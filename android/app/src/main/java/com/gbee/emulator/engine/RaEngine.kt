@@ -419,9 +419,7 @@ object RaEngine {
      * for. Hardcore credit is refused to a client the server cannot place,
      * and the format is how it places one.
      */
-    private fun userAgent(): String =
-        "GBee/v${com.gbee.emulator.BuildConfig.VERSION_NAME} " +
-            "(Android ${android.os.Build.VERSION.RELEASE})"
+    private fun userAgent(): String = com.gbee.emulator.data.httpUserAgent()
 
     private const val ACHIEVEMENT_STRIDE = 7
     private const val LEADERBOARD_STRIDE = 5

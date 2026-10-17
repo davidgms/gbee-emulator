@@ -23,12 +23,22 @@ import java.net.URL
 /** True for an `https://` URL. RA requests and badges carry account data, so nothing else is opened. */
 internal fun isHttps(url: String): Boolean = url.startsWith("https://", ignoreCase = true)
 
+/**
+ * `GBee/vX (Android N)`: app version and OS release only. Without it the
+ * Dalvik default leaks the device model and build id to every server.
+ */
+internal fun httpUserAgent(
+    version: String = com.gbee.emulator.BuildConfig.VERSION_NAME,
+    release: String = android.os.Build.VERSION.RELEASE,
+): String = "GBee/v$version (Android $release)"
+
 object BadgeCache {
 
     private const val TAG = "GBee/BadgeCache"
 
     // A badge is a 64x64 PNG; the cap stops a hostile or broken server from
     // filling the disk.
+    private const val MAX_BADGE_SIDE = 512
     private const val MAX_BADGE_BYTES = 1L * 1024 * 1024
 
     private fun dir(context: Context): File =
@@ -45,8 +55,18 @@ object BadgeCache {
         if (url.isBlank()) return null
         val file = File(dir(context), fileName(url))
         if (!file.isFile && !download(url, file)) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeFile(file.absolutePath, bounds) }
+        if (!isSaneBadgeSize(bounds.outWidth, bounds.outHeight)) {
+            file.delete()
+            return null
+        }
         return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
     }
+
+    /** Badges are 64x64; the margin is for a future size, the cap is for a PNG that declares gigapixels. */
+    internal fun isSaneBadgeSize(width: Int, height: Int): Boolean =
+        width in 1..MAX_BADGE_SIDE && height in 1..MAX_BADGE_SIDE
 
     /**
      * The last path segment, which for RetroAchievements badges is the badge
@@ -71,6 +91,7 @@ object BadgeCache {
             connectTimeout = 10_000
             readTimeout = 20_000
             instanceFollowRedirects = true
+            setRequestProperty("User-Agent", httpUserAgent())
         }
         try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return@runCatching false

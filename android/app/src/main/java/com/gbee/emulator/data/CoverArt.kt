@@ -38,10 +38,16 @@ object CoverArt {
         if (RomBytes.isPath(romPath)) {
             File(romPath).nameWithoutExtension
         } else {
-            RomBytes.displayBaseName(
-                RomSiblings.get(romPath)?.name ?: runCatching { RomBytes.fileName(context, romPath) }.getOrDefault(""),
+            safeBaseName(
+                RomBytes.displayBaseName(
+                    RomSiblings.get(romPath)?.name ?: runCatching { RomBytes.fileName(context, romPath) }.getOrDefault(""),
+                ),
             ).ifEmpty { "doc${romPath.hashCode()}" }
         }
+
+    /** A provider chooses display names, so one with a separator or `..` must not name a file outside covers/. */
+    internal fun safeBaseName(name: String): String =
+        if ('/' in name || '\\' in name || name.contains("..") || '\u0000' in name) "" else name
 
     fun cachedFile(context: Context, romPath: String): File =
         File(cacheDir(context), "${baseName(context, romPath)}.png")
@@ -207,6 +213,7 @@ object CoverArt {
             connectTimeout = 10_000
             readTimeout = 20_000
             instanceFollowRedirects = true
+            setRequestProperty("User-Agent", httpUserAgent())
         }
         try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK) return@runCatching null
