@@ -45,9 +45,9 @@ object CoverArt {
             ).ifEmpty { "doc${romPath.hashCode()}" }
         }
 
-    /** A provider chooses display names, so one with a separator or `..` must not name a file outside covers/. */
+    /** A provider chooses display names, so one with a path separator must not name a file outside covers/; ".png" is appended, so ".." alone cannot. */
     internal fun safeBaseName(name: String): String =
-        if ('/' in name || '\\' in name || name.contains("..") || '\u0000' in name) "" else name
+        if ('/' in name || '\\' in name || '\u0000' in name) "" else name
 
     fun cachedFile(context: Context, romPath: String): File =
         File(cacheDir(context), "${baseName(context, romPath)}.png")

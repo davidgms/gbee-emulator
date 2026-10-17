@@ -27,7 +27,8 @@ class PhaseFiveDownloadsTest {
     @Test
     fun `cover base name cannot escape the covers folder`() {
         assertEquals("", CoverArt.safeBaseName("../x"))
-        assertEquals("", CoverArt.safeBaseName(".."))
+        // ".." alone cannot escape: it becomes "...png" inside covers/.
+        assertEquals("Game..Rev1", CoverArt.safeBaseName("Game..Rev1"))
         assertEquals("", CoverArt.safeBaseName("a/b"))
         assertEquals("", CoverArt.safeBaseName("a\\b"))
         assertEquals("Pokemon", CoverArt.safeBaseName("Pokemon"))
