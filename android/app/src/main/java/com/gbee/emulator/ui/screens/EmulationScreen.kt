@@ -80,6 +80,7 @@ import com.gbee.emulator.engine.RaAchievement
 import com.gbee.emulator.engine.RaEngine
 import com.gbee.emulator.viewmodel.PerfStats
 import com.gbee.emulator.engine.RaGame
+import com.gbee.emulator.engine.RaLeaderboard
 import com.gbee.emulator.data.CustomButton
 import com.gbee.emulator.data.CustomButtonMode
 import com.gbee.emulator.data.LayoutOrientation
@@ -2165,7 +2166,9 @@ private fun AchievementsDialog(
 ) {
     // Read once per opening rather than held in state: the list only changes
     // when something unlocks, and reopening is how a player refreshes it.
-    val items = remember(game, signedIn) { RaEngine.achievements() }
+    val items by produceState(emptyList<RaAchievement>(), game, signedIn) {
+        value = withContext(Dispatchers.IO) { RaEngine.achievements() }
+    }
     val earned = items.count { it.unlocked }
 
     AlertDialog(
@@ -2208,7 +2211,9 @@ private fun AchievementsDialog(
                 ) {
                     // Leaderboards first and only when there are any: most
                     // games have none, and a permanent empty heading is noise.
-                    val boards = remember(game) { RaEngine.leaderboards() }
+                    val boards by produceState(emptyList<RaLeaderboard>(), game) {
+                        value = withContext(Dispatchers.IO) { RaEngine.leaderboards() }
+                    }
                     if (boards.isNotEmpty()) {
                         Text(
                             "Leaderboards",
