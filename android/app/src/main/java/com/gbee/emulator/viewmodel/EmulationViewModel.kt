@@ -499,7 +499,8 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                     _isLoading.value = false
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading ROM", e)
+                Log.d(TAG, "Error loading ROM", e)
+                Log.e(TAG, "Error loading ROM: ${e.javaClass.simpleName}")
                 _errorMessage.value = "Error: ${e.message}"
                 _isLoading.value = false
             }
@@ -1079,7 +1080,8 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             val bytes = try {
                 file.readBytes()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed reading save state slot $slot", e)
+                Log.d(TAG, "Failed reading save state slot $slot", e)
+                Log.e(TAG, "Failed reading save state slot $slot: ${e.javaClass.simpleName}")
                 _stateMessage.value = "Could not read ${slotName(slot)}"
                 return@launch
             }
