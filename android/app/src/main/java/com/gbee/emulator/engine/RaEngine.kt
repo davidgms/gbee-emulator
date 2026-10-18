@@ -100,6 +100,15 @@ object RaEngine {
 
     @Volatile
     private var started = false
+
+    /**
+     * A sidecar that arrived before the session was up. The quick save
+     * auto-load runs right after the ROM starts, about a second before the
+     * server answers, and rcheevos refuses progress for a game it has not
+     * loaded yet - so without this the player's progress was dropped on every
+     * launch. Guarded by [coreLock], like every native call.
+     */
+    private var pendingProgress: ByteArray? = null
     private var tokenLoginSent = false
 
     private val _user = MutableStateFlow<String?>(null)
@@ -189,6 +198,10 @@ object RaEngine {
     fun loadGame(hash: String) {
         check(coreLock.isLocked) { "loadGame needs coreLock" }
         Log.i(TAG, "load game $hash (started=$started)")
+        pendingProgress = null
+        // The old session ends here, not at the server's answer: until then
+        // restoreProgress must see "no session" and hold, not reject.
+        _game.value = null
         if (available && started) runCatching { native.nativeLoadGame(hash) }
     }
 
@@ -196,6 +209,7 @@ object RaEngine {
     fun unloadGame() {
         check(coreLock.isLocked) { "unloadGame needs coreLock" }
         if (available && started) runCatching { native.nativeUnloadGame() }
+        pendingProgress = null
         _game.value = null
     }
 
@@ -228,6 +242,11 @@ object RaEngine {
         check(coreLock.isLocked) { "restoreProgress needs coreLock" }
         if (!available || !started) return false
         val ok = runCatching { native.nativeDeserializeProgress(data) }.getOrDefault(false)
+        if (!ok && _game.value == null) {
+            // No session yet: held for handleGameLoaded rather than lost.
+            pendingProgress = data
+            return false
+        }
         // A bad sidecar makes rcheevos reset the set; the state still loads.
         if (!ok) Log.w(TAG, "achievement progress sidecar rejected")
         return ok
@@ -407,8 +426,15 @@ object RaEngine {
     ) {
         // The old game's abort must not clear the new game's state.
         if (result == RESULT_ABORTED) return
+        // Past the abort return: logout aborts a load without the lock, but
+        // every real answer comes through nativeServerResponse or loadGame.
+        check(coreLock.isLocked) { "handleGameLoaded needs coreLock" }
+        val held = pendingProgress.also { pendingProgress = null }
         _game.value = if (result == RESULT_OK && title != null) {
             Log.i(TAG, "session: $title, $achievements achievements")
+            if (held != null && !runCatching { native.nativeDeserializeProgress(held) }.getOrDefault(false)) {
+                Log.w(TAG, "achievement progress sidecar rejected")
+            }
             RaGame(title, achievements)
         } else {
             // Not an error worth showing: about two thirds of GBA games have
@@ -438,6 +464,7 @@ object RaEngine {
     internal fun resetForTest() {
         started = false
         tokenLoginSent = false
+        pendingProgress = null
         store = null
         _user.value = null
         _game.value = null
