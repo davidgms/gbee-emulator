@@ -721,11 +721,14 @@ The last Android phase, and the gate in front of everything iOS. Owned by
 Nothing here is emulation work. It is the difference between an APK that runs
 on one developer's phone and an app a stranger can install.
 
-- [ ] **Icon and store asset set** - `visual-asset-generator`. The full mipmap
+- [x] **Icon and store asset set** - `visual-asset-generator`. The full mipmap
       set, the adaptive icon's foreground and background, the feature graphic
       and the screenshots. The pixel bee identity already exists in
       `docs/logo.png` and `docs/bee-icon.png`; this is producing every size and
       density Play demands from it.
+      *2026-10-18: done. Launcher mipmaps and the adaptive icon already
+      existed; the Play icon, feature graphic and four screenshots are in
+      [`docs/store/`](docs/store/README.md).*
 - [x] **Release signing** - an upload key kept out of the repository, wired
       through `android/app/build.gradle.kts` from a properties file or the CI
       secret store, never a checked-in keystore.
@@ -760,9 +763,13 @@ on one developer's phone and an app a stranger can install.
       RetroAchievements, after the player signs in, and cover art, only when
       the player enables it. Answer the form from
       [`docs/security/phase5-audit-2026-10-17.md`](docs/security/phase5-audit-2026-10-17.md).
-- [ ] **No ROMs, ever.** The app ships no games and links to none (the
+- [x] **No ROMs, ever.** The app ships no games and links to none (the
       homebrew catalogue was removed in #90), and it must never become an
       index of commercial games. Play removes emulators over exactly this.
+      *2026-10-18: checked. The release AAB holds no ROM or archive, and the
+      code links to no ROM site. The only game data shipped is
+      `gba-game-codes.json` and `gba-game-names.txt`, names used to look up
+      box art for the player's own files.*
 - [ ] **Internal testing track first**, on a device that is not the
       development phone, then production.
 
