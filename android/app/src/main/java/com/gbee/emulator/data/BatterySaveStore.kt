@@ -151,7 +151,8 @@ internal fun importLegacySave(
             val read = runCatching { legacy.read() }.getOrNull() ?: return false
             val keep = runCatching { fit(read.size) }.getOrElse { return false }
             if (keep == null) {
-                Log.w("GBee/Save", "legacy save of ${read.size} bytes does not fit ${private.name}, skipped")
+                Log.d("GBee/Save", "legacy save does not fit ${private.name}")
+                Log.w("GBee/Save", "legacy save of ${read.size} bytes does not fit, skipped")
                 return markImported(marker)
             }
             val bytes = read.copyOf(keep)

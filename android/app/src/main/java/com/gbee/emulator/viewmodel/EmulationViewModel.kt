@@ -423,7 +423,8 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             _errorMessage.value = null
             try {
                 if (RomBytes.isPath(filePath) && !File(filePath).exists()) {
-                    Log.e(TAG, "ROM not found: $filePath")
+                    Log.d(TAG, "ROM not found: $filePath")
+                    Log.e(TAG, "ROM not found")
                     _errorMessage.value = "ROM file not found"
                     _isLoading.value = false
                     return@launch
@@ -498,7 +499,8 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                     _isLoading.value = false
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading ROM", e)
+                Log.d(TAG, "Error loading ROM", e)
+                Log.e(TAG, "Error loading ROM: ${e.javaClass.simpleName}")
                 _errorMessage.value = "Error: ${e.message}"
                 _isLoading.value = false
             }
@@ -565,8 +567,17 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
     private fun loadExistingSave() {
         val store = batterySave ?: return
         val bytes = store.load() ?: return
-        engine.writeSave(bytes)
-        Log.i(TAG, "Loaded battery save from ${store.file} (${bytes.size} bytes)")
+        if (!engine.writeSave(bytes)) {
+            // The core refused the save, so its save memory is not this file.
+            // Drop the store: a later flush would otherwise write that memory
+            // over the player's good .sav.
+            batterySave = null
+            Log.e(TAG, "Battery save rejected by the core; saves are off for this session")
+            _stateMessage.value = "Could not load the game save - saving is off until you reopen the game"
+            return
+        }
+        Log.d(TAG, "Loaded battery save from ${store.file}")
+        Log.i(TAG, "Loaded battery save (${bytes.size} bytes)")
     }
 
     /** Wall-clock instant the batch being paced is allowed to end. */
@@ -1077,7 +1088,8 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             val bytes = try {
                 file.readBytes()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed reading save state slot $slot", e)
+                Log.d(TAG, "Failed reading save state slot $slot", e)
+                Log.e(TAG, "Failed reading save state slot $slot: ${e.javaClass.simpleName}")
                 _stateMessage.value = "Could not read ${slotName(slot)}"
                 return@launch
             }

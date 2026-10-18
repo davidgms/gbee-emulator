@@ -12,8 +12,14 @@ internal const val STATE_MAX_BYTES = 16L shl 20
 
 private val STATE_MAGIC = "GBAS".toByteArray(Charsets.US_ASCII)
 
-/** The state versions `core/src/savestate.rs` restores (`6..=SAVE_VERSION`); keep in step with it. */
-internal val STATE_VERSIONS = 6..11
+/**
+ * The state versions an import accepts: `10..=SAVE_VERSION` in
+ * `core/src/savestate.rs`; keep in step with it. The core still restores
+ * 6..9, the app's own old slot files, but those carry no ROM CRC, so the core
+ * cannot refuse another game's state and its battery save would replace this
+ * game's.
+ */
+internal val STATE_VERSIONS = 10..11
 
 /** Bytes [isGbeeState] needs: the magic and the little-endian version after it. */
 internal const val STATE_HEADER_BYTES = 8

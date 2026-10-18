@@ -222,7 +222,10 @@ object SaveImport {
                     if (slot != null) importState(context, r, key, slot)
                     else forceImportSave(RomFiles.privateSave(context, key), read(context, r.uri), keep)
                 }
-                    .onFailure { Log.w(TAG, "import of ${r.fileName} failed: $it") }
+                    .onFailure {
+                        Log.d(TAG, "import of ${r.fileName} failed")
+                        Log.w(TAG, "import failed: ${it.javaClass.simpleName}")
+                    }
                     .getOrDefault(false)
                 if (ok) imported++ else failed++
             }

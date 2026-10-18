@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12 and higher. Same rule as backup_rules.xml, for both the cloud
-     backup and the device-to-device transfer. -->
+     backup and the device-to-device transfer: no token, no re-downloadable
+     cover or badge caches; saves and states stay. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="retroachievements.xml" />
+        <exclude domain="file" path="covers" />
+        <exclude domain="file" path="badges" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="retroachievements.xml" />
+        <exclude domain="file" path="covers" />
+        <exclude domain="file" path="badges" />
     </device-transfer>
 </data-extraction-rules>

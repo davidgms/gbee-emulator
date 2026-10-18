@@ -43,11 +43,14 @@ class StateTransferTest {
             magic.toByteArray() + byteArrayOf(version.toByte(), (version shr 8).toByte(), 0, 0) + ByteArray(8)
         assertTrue(isGbeeState(header("GBAS", 11)))
         assertTrue(isGbeeState(header("GBAS", 10)))
-        assertTrue(isGbeeState(header("GBAS", 6)))
         assertFalse(isGbeeState(header("MGBA", 10)))
         // A newer core's state, or one older than the oldest this core restores.
         assertFalse(isGbeeState(header("GBAS", 12)))
         assertFalse(isGbeeState(header("GBAS", 5)))
+        // v6..v9 carry no ROM CRC, so the core cannot tell another game's state
+        // from this one's; an import must refuse them (P5-RE-1).
+        assertFalse(isGbeeState(header("GBAS", 9)))
+        assertFalse(isGbeeState(header("GBAS", 6)))
         assertFalse(isGbeeState("GBAS".toByteArray()))
         assertFalse(isGbeeState(byteArrayOf(1, 2)))
     }

@@ -141,7 +141,10 @@ object SaveExport {
         val bytes = runCatching { source(context, r).readBytes() }.getOrNull()
         if (bytes == null || bytes.isEmpty()) return false
         return runCatching { write(context, tree, r, bytes) }
-            .onFailure { Log.w(TAG, "export of ${r.targetName} failed: $it") }
+            .onFailure {
+                Log.d(TAG, "export of ${r.targetName} failed")
+                Log.w(TAG, "export failed: ${it.javaClass.simpleName}")
+            }
             .getOrElse { false }
     }
 

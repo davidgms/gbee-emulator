@@ -134,7 +134,7 @@ object RomBytes {
         if (isPath(id)) return ZipFile(File(id)).use(block)
         context.contentResolver.openFileDescriptor(Uri.parse(id), "r")?.use { pfd ->
             val direct = runCatching { ZipFile(File("/proc/self/fd/${pfd.fd}")) }
-                .onFailure { Log.w(TAG, "zip descriptor not openable as a file, copying: $it") }
+                .onFailure { Log.w(TAG, "zip descriptor not openable as a file, copying: ${it.javaClass.simpleName}") }
                 .getOrNull()
             if (direct != null) return direct.use(block)
         }

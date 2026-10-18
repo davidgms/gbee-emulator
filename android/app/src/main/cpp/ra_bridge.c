@@ -267,11 +267,13 @@ static void RC_CCONV ra_server_call(const rc_api_request_t* request,
   }
 }
 
+#define RA_MAX_RESPONSE_BYTES (16 * 1024 * 1024)
+
 JNIEXPORT void JNICALL
 Java_com_gbee_emulator_engine_RaEngine_nativeServerResponse(
     JNIEnv* env, jclass clazz, jint slot, jint status, jbyteArray body) {
   rc_api_server_response_t response;
-  jbyte* bytes = NULL;
+  char* copy = NULL;
   jsize length = 0;
   rc_client_server_callback_t callback;
   void* callback_data;
@@ -294,20 +296,27 @@ Java_com_gbee_emulator_engine_RaEngine_nativeServerResponse(
   response.http_status_code = status;
   if (body != NULL) {
     length = (*env)->GetArrayLength(env, body);
-    bytes = (*env)->GetByteArrayElements(env, body, NULL);
-    if (bytes == NULL) {
-      /* Out of memory pinning the array. Handing rcheevos a NULL body with a
-       * non-zero length would have it read through a null pointer. */
+    /* Same cap as RaEngine.MAX_RESPONSE_BYTES; Kotlin enforces it first. */
+    if (length < 0 || length > RA_MAX_RESPONSE_BYTES) {
       ra_fail_request(callback, callback_data);
       return;
     }
-    response.body = (const char*)bytes;
+    /* rcheevos parses the body as a C string, so hand it len+1 bytes with a
+     * terminator rather than the raw array, which has none. */
+    copy = (char*)malloc((size_t)length + 1);
+    if (copy == NULL) {
+      ra_fail_request(callback, callback_data);
+      return;
+    }
+    if (length > 0) {
+      (*env)->GetByteArrayRegion(env, body, 0, length, (jbyte*)copy);
+    }
+    copy[length] = '\0';
+    response.body = copy;
     response.body_length = (size_t)length;
   }
   callback(&response, callback_data);
-  if (bytes != NULL) {
-    (*env)->ReleaseByteArrayElements(env, body, bytes, JNI_ABORT);
-  }
+  free(copy);
 }
 
 /* ----------------------------------------------------------------- events */

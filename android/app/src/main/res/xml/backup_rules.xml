@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 11 and lower. The RetroAchievements token works like a password,
-     so it never leaves the phone; saves and states stay in the backup on
-     purpose, so game progress moves to a new phone. -->
+     so it never leaves the phone. The cover and badge caches are re-downloadable
+     and the cover files are named after the player's ROM files, so they stay
+     out too. Saves and states stay in the backup on purpose, so game progress
+     moves to a new phone. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="retroachievements.xml" />
+    <exclude domain="file" path="covers" />
+    <exclude domain="file" path="badges" />
 </full-backup-content>

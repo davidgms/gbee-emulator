@@ -241,13 +241,16 @@ object RaEngine {
      *
      * Empty when no game is loaded or nobody is signed in. Returned flat from
      * the C side, [ACHIEVEMENT_STRIDE] strings each, because a set runs to
-     * hundreds and building objects across JNI costs a call each. Deliberately
-     * not under [coreLock]: it reads rcheevos data only, and Compose must not
-     * block on a frame.
+     * hundreds and building objects across JNI costs a call each. Takes
+     * [coreLock] (see below) because it reads rcheevos data that unload frees.
      */
-    fun achievements(): List<RaAchievement> {
+    suspend fun achievements(): List<RaAchievement> {
         if (!available || !started) return emptyList()
-        val f = runCatching { native.nativeAchievements() }.getOrNull() ?: return emptyList()
+        // Under coreLock: unloadGame frees the strings the C side hands back
+        // while it builds this array. Suspends rather than blocks, so call
+        // it from a coroutine, never from composition.
+        val f = coreLock.withLock { runCatching { native.nativeAchievements() }.getOrNull() }
+            ?: return emptyList()
         return (0 until f.size / ACHIEVEMENT_STRIDE).mapNotNull { n ->
             val o = n * ACHIEVEMENT_STRIDE
             RaAchievement(
@@ -262,10 +265,11 @@ object RaEngine {
         }
     }
 
-    /** Every leaderboard in the loaded game, [LEADERBOARD_STRIDE] strings each. Not under [coreLock]. */
-    fun leaderboards(): List<RaLeaderboard> {
+    /** Every leaderboard in the loaded game, [LEADERBOARD_STRIDE] strings each. Takes [coreLock]; suspends. */
+    suspend fun leaderboards(): List<RaLeaderboard> {
         if (!available || !started) return emptyList()
-        val f = runCatching { native.nativeLeaderboards() }.getOrNull() ?: return emptyList()
+        val f = coreLock.withLock { runCatching { native.nativeLeaderboards() }.getOrNull() }
+            ?: return emptyList()
         return (0 until f.size / LEADERBOARD_STRIDE).mapNotNull { n ->
             val o = n * LEADERBOARD_STRIDE
             RaLeaderboard(
