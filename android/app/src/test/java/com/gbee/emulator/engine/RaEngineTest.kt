@@ -189,11 +189,42 @@ class RaEngineTest {
             RaEngine.handleGameLoaded(0, null, "Other", 1)
         }
         assertEquals(4, fake.named("restore").size)
+
+        // An aborted answer keeps it for the real one; a new game drops it.
+        RaEngine.coreLock.withLock {
+            RaEngine.loadGame("third")
+            fake.restoreOk = false
+            RaEngine.restoreProgress(byteArrayOf(5))
+            RaEngine.handleGameLoaded(-31, "aborted", null, 0)
+            fake.restoreOk = true
+            RaEngine.handleGameLoaded(0, null, "Third", 1)
+            fake.restoreOk = false
+            RaEngine.loadGame("fourth")
+            RaEngine.restoreProgress(byteArrayOf(6))
+            RaEngine.loadGame("fifth")
+            fake.restoreOk = true
+            RaEngine.handleGameLoaded(0, null, "Fifth", 1)
+        }
+        assertEquals(listOf<Byte>(5), fake.named("restore")[5].args[0])
+        assertEquals(7, fake.named("restore").size)
     }
 
     @Test
-    fun `an aborted game load leaves the current game alone`() {
-        RaEngine.handleGameLoaded(0, null, "Zelda", 12)
+    fun `a sidecar rejected while the session is up is not held`() = runBlocking {
+        started()
+        RaEngine.coreLock.withLock {
+            RaEngine.handleGameLoaded(0, null, "Zelda", 12)
+            fake.restoreOk = false
+            RaEngine.restoreProgress(byteArrayOf(9))
+            fake.restoreOk = true
+            RaEngine.handleGameLoaded(0, null, "Zelda", 12)
+        }
+        assertEquals(1, fake.named("restore").size)
+    }
+
+    @Test
+    fun `an aborted game load leaves the current game alone`() = runBlocking {
+        RaEngine.coreLock.withLock { RaEngine.handleGameLoaded(0, null, "Zelda", 12) }
         RaEngine.handleGameLoaded(-31, "The requested game is no longer active", null, 0)
         assertEquals(RaGame("Zelda", 12), RaEngine.game.value)
     }

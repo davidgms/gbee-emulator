@@ -199,6 +199,9 @@ object RaEngine {
         check(coreLock.isLocked) { "loadGame needs coreLock" }
         Log.i(TAG, "load game $hash (started=$started)")
         pendingProgress = null
+        // The old session ends here, not at the server's answer: until then
+        // restoreProgress must see "no session" and hold, not reject.
+        _game.value = null
         if (available && started) runCatching { native.nativeLoadGame(hash) }
     }
 
@@ -423,7 +426,9 @@ object RaEngine {
     ) {
         // The old game's abort must not clear the new game's state.
         if (result == RESULT_ABORTED) return
-        // Called from inside nativeServerResponse, so coreLock is held.
+        // Past the abort return: logout aborts a load without the lock, but
+        // every real answer comes through nativeServerResponse or loadGame.
+        check(coreLock.isLocked) { "handleGameLoaded needs coreLock" }
         val held = pendingProgress.also { pendingProgress = null }
         _game.value = if (result == RESULT_OK && title != null) {
             Log.i(TAG, "session: $title, $achievements achievements")
