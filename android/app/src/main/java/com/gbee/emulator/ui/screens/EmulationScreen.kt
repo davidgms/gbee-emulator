@@ -2166,9 +2166,12 @@ private fun AchievementsDialog(
 ) {
     // Read once per opening rather than held in state: the list only changes
     // when something unlocks, and reopening is how a player refreshes it.
-    val items by produceState(emptyList<RaAchievement>(), game, signedIn) {
+    // null until the read under coreLock comes back, so the dialog says
+    // "loading" rather than briefly claiming the game has no set.
+    val loaded by produceState<List<RaAchievement>?>(null, game, signedIn) {
         value = withContext(Dispatchers.IO) { RaEngine.achievements() }
     }
+    val items = loaded.orEmpty()
     val earned = items.count { it.unlocked }
 
     AlertDialog(
@@ -2199,6 +2202,7 @@ private fun AchievementsDialog(
                         "Settings to track achievements.",
                     fontSize = 13.sp,
                 )
+                loaded == null -> Text("Loading achievements...", fontSize = 13.sp)
                 items.isEmpty() -> Text(
                     "RetroAchievements has no achievement set for this game. " +
                         "About two thirds of the Game Boy Advance library has " +
