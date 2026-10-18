@@ -726,12 +726,14 @@ on one developer's phone and an app a stranger can install.
       and the screenshots. The pixel bee identity already exists in
       `docs/logo.png` and `docs/bee-icon.png`; this is producing every size and
       density Play demands from it.
-- [ ] **Release signing** - an upload key kept out of the repository, wired
+- [x] **Release signing** - an upload key kept out of the repository, wired
       through `android/app/build.gradle.kts` from a properties file or the CI
       secret store, never a checked-in keystore.
-      *2026-10-18: the wiring is done (`GBA_KEYSTORE*` env vars in
-      `build.gradle.kts`, CI step "Build signed release AAB" on master). Open:
-      the upload key itself and the four `GBA_*` repository secrets.*
+      *2026-10-18: done. The upload key (PKCS12, alias `upload`, SHA-256
+      `24:87:B8:86:...:29:FF`) lives outside the repository with the owner,
+      and the four `GBA_*` repository secrets hold it. CI run 39150267470 on
+      master produced `gbee-release-aab`, signed by that certificate, with both
+      ABIs inside. A lost key is reset from Play Console, App integrity.*
 - [x] **A signed App Bundle that actually contains both ABIs.** `.so` files are
       gitignored and only exist wherever a build last ran, so the AAB is the
       first artefact where "did the native library ship" is a real question.
