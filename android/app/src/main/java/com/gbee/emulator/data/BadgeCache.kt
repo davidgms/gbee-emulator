@@ -29,7 +29,7 @@ internal fun isHttps(url: String): Boolean = url.startsWith("https://", ignoreCa
  */
 internal fun httpUserAgent(
     version: String = com.gbee.emulator.BuildConfig.VERSION_NAME,
-    release: String = android.os.Build.VERSION.RELEASE,
+    release: String? = android.os.Build.VERSION.RELEASE,
 ): String = "GBee/v$version (Android $release)"
 
 object BadgeCache {
@@ -57,10 +57,9 @@ object BadgeCache {
         if (!file.isFile && !download(url, file)) return null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching { BitmapFactory.decodeFile(file.absolutePath, bounds) }
-        if (!isSaneBadgeSize(bounds.outWidth, bounds.outHeight)) {
-            file.delete()
-            return null
-        }
+        // Kept on disk, not deleted: a deleted file is downloaded again on
+        // every opening, and this check then refuses it again for free.
+        if (!isSaneBadgeSize(bounds.outWidth, bounds.outHeight)) return null
         return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
     }
 
