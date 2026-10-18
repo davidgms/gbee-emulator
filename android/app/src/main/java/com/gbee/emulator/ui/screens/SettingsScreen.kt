@@ -1,13 +1,9 @@
 package com.gbee.emulator.ui.screens
 
-import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 
-import android.provider.Settings as AndroidSettings
-import android.view.KeyEvent
 import android.widget.Toast
-import android.view.InputDevice
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -25,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -145,22 +142,6 @@ fun SettingsScreen(
     var fastForwardRatio by remember { mutableIntStateOf(displaySettings.getFastForwardRatio()) }
     var showSpeedMenu by remember { mutableStateOf(false) }
     var muteFastForward by remember { mutableStateOf(displaySettings.getMuteOnFastForward()) }
-    // Read once: a pad paired while this screen is open is rare enough that a
-    // reopen is a fair price for not polling the input system every frame.
-    //
-    // The source bits alone are not enough. This phone's fingerprint reader
-    // is a virtual uinput device that claims SOURCE_GAMEPAD, so it was listed
-    // as a paired controller. A real pad is physical and has an A button.
-    val gamepads = remember {
-        InputDevice.getDeviceIds().toList()
-            .mapNotNull { InputDevice.getDevice(it) }
-            .filter { device ->
-                !device.isVirtual &&
-                    device.supportsSource(InputDevice.SOURCE_GAMEPAD) &&
-                    device.hasKeys(KeyEvent.KEYCODE_BUTTON_A).firstOrNull() == true
-            }
-            .map { it.name }
-    }
     var interframeBlend by remember { mutableStateOf(displaySettings.getInterframeBlend()) }
     var folderError by remember { mutableStateOf<String?>(null) }
 
@@ -822,22 +803,14 @@ fun SettingsScreen(
                         displaySettings.setDpadCardinalHalfDegrees(dpadCardinal)
                     },
                 )
-                // Reports what is actually paired and opens the system's own
-                // Bluetooth screen, which is the only place pairing happens.
-                // Mapping a pad's buttons to the GBA's is not built yet, so
-                // this deliberately does not claim it is.
+                // Mapping a pad's buttons to the GBA's is not built or tested
+                // yet, so the row is shown disabled instead of pointing at pairing.
                 SettingsItem(
                     icon = Icons.Default.Bluetooth,
                     title = "Bluetooth Controller",
-                    subtitle = gamepads.firstOrNull() ?: "None paired - tap to pair",
-                    onClick = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(AndroidSettings.ACTION_BLUETOOTH_SETTINGS)
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }
+                    subtitle = "Coming soon!",
+                    onClick = { },
+                    enabled = false,
                 )
             }
 
@@ -1250,11 +1223,13 @@ fun SettingsItem(
     subtitle: String,
     onClick: () -> Unit,
     onInfo: (() -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.5f)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1286,11 +1261,13 @@ fun SettingsItem(
                 )
             }
         }
-        Icon(
-            Icons.Default.ChevronRight,
-            contentDescription = null,
-            tint = PineGlowMist.copy(alpha = 0.4f),
-        )
+        if (enabled) {
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = PineGlowMist.copy(alpha = 0.4f),
+            )
+        }
     }
 }
 
