@@ -77,7 +77,10 @@ class RomFolderManager(private val context: Context) {
                     }
                 }
             }
-        }.onFailure { Log.w(TAG, "cannot list $docId: $it") }.getOrNull()
+        }.onFailure {
+            Log.d(TAG, "cannot list $docId")
+            Log.w(TAG, "cannot list a folder: ${it.javaClass.simpleName}")
+        }.getOrNull()
     }
 
     private val prefs = context.getSharedPreferences("rom_folders", Context.MODE_PRIVATE)
@@ -122,7 +125,8 @@ class RomFolderManager(private val context: Context) {
         try {
             context.contentResolver.takePersistableUriPermission(tree, GRANT)
         } catch (e: SecurityException) {
-            Log.w(TAG, "grant not kept for $tree", e)
+            Log.d(TAG, "grant not kept for $tree")
+            Log.w(TAG, "grant not kept: ${e.javaClass.simpleName}")
             return false
         }
         val rootId = DocumentsContract.getTreeDocumentId(tree)

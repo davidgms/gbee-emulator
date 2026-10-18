@@ -58,8 +58,8 @@ class RaEngineTest {
             rec("serverResponse", slot, status, body.toList())
         override fun nativeSerializeProgress(): ByteArray? { rec("serialize"); return ByteArray(1) }
         override fun nativeDeserializeProgress(data: ByteArray): Boolean { rec("restore"); return true }
-        override fun nativeAchievements(): Array<String>? = achievements
-        override fun nativeLeaderboards(): Array<String>? = null
+        override fun nativeAchievements(): Array<String>? { rec("achievements"); return achievements }
+        override fun nativeLeaderboards(): Array<String>? { rec("leaderboards"); return null }
         override fun nativeHashRom(data: ByteArray): String? = null
         override fun nativeVersion(): String? = null
     }
@@ -258,8 +258,17 @@ class RaEngineTest {
             "1", "Tab\tTitle", "desc one", "10", "1", "", "http://b/1.png",
             "2", "Plain", "desc two", "5", "0", "3/10", "http://b/2.png",
         )
-        val list = RaEngine.achievements()
+        val list = runBlocking { RaEngine.achievements() }
         assertEquals(listOf("Tab\tTitle", "Plain"), list.map { it.title })
         assertEquals(listOf(1, 2), list.map { it.id })
+    }
+
+    @Test
+    fun `list reads run under the core lock so unload cannot free them mid-read`() = runBlocking {
+        started()
+        RaEngine.achievements()
+        RaEngine.leaderboards()
+        assertTrue(fake.named("achievements").single().locked)
+        assertTrue(fake.named("leaderboards").single().locked)
     }
 }

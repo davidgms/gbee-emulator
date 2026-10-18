@@ -34,3 +34,12 @@
     static void onLogin(int, java.lang.String);
     static void onGameLoaded(int, java.lang.String, java.lang.String, int);
 }
+
+# Release logcat: v, d and i calls are removed, so the call sites that carry a
+# file name, SAF Uri, path or game hash log it at d/i and keep only the error
+# class at w/e.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
