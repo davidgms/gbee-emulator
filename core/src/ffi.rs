@@ -64,7 +64,11 @@ pub unsafe extern "C" fn gbee_destroy(ptr: *mut c_void) {
 /// app vanishing mid-game with no message and no chance to save.
 fn guarded<T>(fallback: T, f: impl FnOnce() -> T) -> T {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| {
-        log::error!("[GBee] core panicked; the machine may be inconsistent");
+        // Once per process: a panic that repeats every frame would flood logcat.
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            log::error!("[GBee] core panicked; the machine may be inconsistent");
+        }
         fallback
     })
 }
@@ -85,13 +89,16 @@ const MAX_PEEK_BYTES: usize = 256 * 1024;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 const MAX_AUDIO_SAMPLES: usize = 1 << 16;
 
-/// A Kotlin-supplied buffer length as a `usize`, or `None` when it is not in
-/// `1..=cap`. Sizes a Vec, and an allocation failure aborts the process.
+/// A Kotlin-supplied buffer length as a `usize`, clamped to `cap`, or `None`
+/// when it is not positive. Sizes a Vec, and an allocation failure aborts the
+/// process. Clamped rather than refused, so a larger Kotlin buffer still gets
+/// a capped copy instead of silence.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 fn jni_len(requested: i32, cap: usize) -> Option<usize> {
     usize::try_from(requested)
         .ok()
-        .filter(|&n| (1..=cap).contains(&n))
+        .filter(|&n| n >= 1)
+        .map(|n| n.min(cap))
 }
 
 /// Load a ROM image and power-cycle the machine. Returns 0 on success, -1 if
@@ -1016,12 +1023,15 @@ mod boundary_tests {
     }
 
     #[test]
-    fn a_kotlin_length_past_the_cap_is_refused() {
+    fn a_kotlin_length_past_the_cap_is_clamped() {
         assert_eq!(jni_len(0, 16), None);
         assert_eq!(jni_len(-1, 16), None);
         assert_eq!(jni_len(16, 16), Some(16));
-        assert_eq!(jni_len(17, 16), None);
-        assert_eq!(jni_len(i32::MAX, MAX_AUDIO_SAMPLES), None);
-        assert_eq!(jni_len(i32::MAX, MAX_PEEK_BYTES), None);
+        assert_eq!(jni_len(17, 16), Some(16));
+        assert_eq!(
+            jni_len(i32::MAX, MAX_AUDIO_SAMPLES),
+            Some(MAX_AUDIO_SAMPLES)
+        );
+        assert_eq!(jni_len(i32::MAX, MAX_PEEK_BYTES), Some(MAX_PEEK_BYTES));
     }
 }
