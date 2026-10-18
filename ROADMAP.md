@@ -729,15 +729,27 @@ on one developer's phone and an app a stranger can install.
 - [ ] **Release signing** - an upload key kept out of the repository, wired
       through `android/app/build.gradle.kts` from a properties file or the CI
       secret store, never a checked-in keystore.
-- [ ] **A signed App Bundle that actually contains both ABIs.** `.so` files are
+      *2026-10-18: the wiring is done (`GBA_KEYSTORE*` env vars in
+      `build.gradle.kts`, CI step "Build signed release AAB" on master). Open:
+      the upload key itself and the four `GBA_*` repository secrets.*
+- [x] **A signed App Bundle that actually contains both ABIs.** `.so` files are
       gitignored and only exist wherever a build last ran, so the AAB is the
       first artefact where "did the native library ship" is a real question.
       Verify `arm64-v8a` and `armeabi-v7a` are both inside the bundle before
       uploading anything.
-- [ ] **R8 / ProGuard rules that do not break JNI.** `GbaEngine`'s `external
+      *2026-10-18: the release AAB holds `libgbee_core.so` and `libgbee_ra.so`
+      for both ABIs and no x86_64. CI now builds it on every push and fails
+      if any of the four is missing. Signing it is the item above.*
+- [x] **R8 / ProGuard rules that do not break JNI.** `GbaEngine`'s `external
       fun` declarations are matched by name from Rust; a rename or a strip
       turns into an `UnsatisfiedLinkError` that only appears in the release
       build, never in debug.
+      *2026-10-18: every `Java_..._GbaEngine_*` (23) and `Java_..._RaEngine_*`
+      (18) export has its method in the release dex, and the four C callbacks
+      survive. On the phone, an R8 release build ran 240p, saved and loaded a
+      state, and completed a RetroAchievements sign-in round trip (a fake
+      account, so the server's "invalid password" came back through
+      `onServerRequest` and `onLogin`).*
 - [ ] **Play Console listing** - description, screenshots, content rating and
       the data-safety form. The store title is **GBee - GBA Emulator**, so the
       listing matches a search for "gba"; the app itself is GBee Emulator and
