@@ -5,6 +5,12 @@ metadata:
   type: feedback
 ---
 
+**2026-10-17:** temp/phase5/probes is stale (depends on the old GeeBeeAyy path and
+`geebeeayy_core`). Use temp/phase5/probes2: same main.rs with `gbee_core`, path
+`../../../core`, plus `src/bin/boundary.rs` (C ABI probes via `gbee_core::ffi::*`,
+which is `pub mod`). Byte-offset modes (`edge`, `fields`) predate v11, so an
+"ok=false" there may be a misaligned edit, not validation.
+
 Run every probe/test binary as `prlimit --as=4000000000 timeout 600 <cmd>`.
 
 **Why:** a save-state probe without the cap grew to 15.7 GB, got OOM-killed and

@@ -35,7 +35,7 @@ as unverified.
 | `savestate.rs` | ~330 | Format v4: register banks, timers, DMA derived state, the whole `io_regs` file, the APU and the cartridge save. A rejected restore rolls back. Wired to eight UI slots. |
 | `bios.rs` | ~450 | HLE SWIs including `CpuFastSet`, `ArcTan`/`ArcTan2` and the three diff unfilters. `BgAffineSet`/`ObjAffineSet`/`BitUnPack` are still stubs; the sound-driver calls are absent. |
 | `ffi.rs` | ~770 | C ABI + JNI: input, frame buffer, audio, battery saves with a dirty flag, and save states as bytes. 13 JNI symbols, all present in the built `.so`. |
-| `android/` | ~7680 | Compose UI, JNI bridge, `AudioTrack` output, touch overlay wired to the core, battery saves and save-state slots on disk, integer scaling with nearest-neighbour filtering. Per-game layouts with custom buttons, haptics, fast-forward, rewind, screenshots, homebrew downloader. **Builds, installs and emulates on a device.** |
+| `android/` | ~7680 | Compose UI, JNI bridge, `AudioTrack` output, touch overlay wired to the core, battery saves and save-state slots on disk, integer scaling with nearest-neighbour filtering. Per-game layouts with custom buttons, haptics, fast-forward, rewind, screenshots. **Builds, installs and emulates on a device.** |
 | `android/.../cpp/` | ~330 | The bridge between Kotlin and `rcheevos`, plus a CMake build for the pinned submodule. The only C in the project, and it is on the frontend side on purpose. |
 | tests | ~5000 | `core/tests/` ~4500 lines across twelve files; `android/app/src/test/` ~500 lines of plain JVM JUnit. Both run in CI on every push, plus an x86_64 emulator smoke test that installs the APK. |
 | `rewind.rs` | ~80 | Bounded ring of save states. **Wired end to end**: snapshot every 30 frames, depth 20, hold-to-rewind in the transport row. Verified on a device. |
@@ -684,28 +684,32 @@ The app now reads files the player owns, holds a RetroAchievements login token,
 talks to two third-party servers, and loads two native libraries. Each of those
 is a door. This phase checks every one of them before strangers can install it.
 
-- [ ] **What leaves the phone** - every network request the app can make,
+- [x] **What leaves the phone** - every network request the app can make,
       audited: where it goes, what it carries, whether it can carry anything
       about the player beyond what they asked to send. The data-safety form on
       Play is answered from this audit, not from intent.
-- [ ] **What stays on the phone, and who can read it** - the login token, save
+- [x] **What stays on the phone, and who can read it** - the login token, save
       files, save states, cached covers and badges: where each lives, whether
       another app can reach it, whether it ends up in a backup or a log.
-- [ ] **Permissions** - each one justified or removed. `MANAGE_EXTERNAL_STORAGE`
+- [x] **Permissions** - each one justified or removed. `MANAGE_EXTERNAL_STORAGE`
       in particular reaches far beyond ROM folders and is the first thing a
       reviewer, or an attacker, looks at.
-- [ ] **Hostile input** - a malformed ROM, a zip bomb, a zip with path traversal
+- [x] **Hostile input** - a malformed ROM, a zip bomb, a zip with path traversal
       in its entry names, a corrupt save state, a truncated header, an oversized
       server response. The core and the C bridge parse untrusted bytes; this is
       where a crash becomes an exploit.
-- [ ] **The native boundary** - JNI and the C bridge read lengths and pointers
+- [x] **The native boundary** - JNI and the C bridge read lengths and pointers
       from the other side. Bounds, lifetimes, and what happens when Kotlin and C
       disagree about a size.
-- [ ] **Exported components and intents** - nothing reachable from another app
+- [x] **Exported components and intents** - nothing reachable from another app
       that should not be.
 
 **Exit criterion:** no path by which the app leaks the player's data or exposes
 something on their phone they did not grant, with the reasoning written down.
+
+Done 2026-10-17: audit and reasoning in
+[`docs/security/phase5-audit-2026-10-17.md`](docs/security/phase5-audit-2026-10-17.md),
+fixes in #98 to #101.
 
 ---
 
@@ -738,12 +742,13 @@ on one developer's phone and an app a stranger can install.
       the data-safety form. The store title is **GBee - GBA Emulator**, so the
       listing matches a search for "gba"; the app itself is GBee Emulator and
       its package is `com.gbee.emulator`. The honest answer to the data-safety questions is
-      that the app collects nothing. It reaches the network in three cases only:
-      RetroAchievements, after the player signs in; cover art, only when the
-      player enables it; and homebrew downloads, only on request.
-- [ ] **No ROMs, ever.** The homebrew catalogue is freely distributable
-      homebrew only and is not, and will not become, an index of commercial
-      games. Play removes emulators over exactly this.
+      that the app collects nothing. It reaches the network in two cases only:
+      RetroAchievements, after the player signs in, and cover art, only when
+      the player enables it. Answer the form from
+      [`docs/security/phase5-audit-2026-10-17.md`](docs/security/phase5-audit-2026-10-17.md).
+- [ ] **No ROMs, ever.** The app ships no games and links to none (the
+      homebrew catalogue was removed in #90), and it must never become an
+      index of commercial games. Play removes emulators over exactly this.
 - [ ] **Internal testing track first**, on a device that is not the
       development phone, then production.
 
