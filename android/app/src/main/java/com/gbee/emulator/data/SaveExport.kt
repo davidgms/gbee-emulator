@@ -166,7 +166,7 @@ object SaveExport {
             if (old.contentEquals(bytes)) return null
             // Every replaced file is kept, app-private, before anything in their folder changes.
             val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-            if (!atomicWrite(File(File(context.filesDir, "export-backups"), "${r.targetName}.$stamp"), old)) return false
+            if (!atomicWrite(File(File(context.filesDir, "export-backups"), "${File(r.targetName).name}.$stamp"), old)) return false
             return runCatching { put(existing, bytes); readBack(existing).contentEquals(bytes) }.getOrDefault(false) ||
                 run { runCatching { put(existing, old) }; false }
         }
