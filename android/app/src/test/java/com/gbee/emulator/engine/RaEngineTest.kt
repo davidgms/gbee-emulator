@@ -34,6 +34,7 @@ class RaEngineTest {
         var onLoadGame: () -> Unit = {}
         var onInit: () -> Unit = {}
         var achievements: Array<String>? = null
+        var restoreOk = true
 
         private fun rec(method: String, vararg args: Any?) {
             calls += Call(method, args.toList(), Thread.currentThread(), RaEngine.coreLock.isLocked)
@@ -57,7 +58,7 @@ class RaEngineTest {
         override fun nativeServerResponse(slot: Int, status: Int, body: ByteArray) =
             rec("serverResponse", slot, status, body.toList())
         override fun nativeSerializeProgress(): ByteArray? { rec("serialize"); return ByteArray(1) }
-        override fun nativeDeserializeProgress(data: ByteArray): Boolean { rec("restore"); return true }
+        override fun nativeDeserializeProgress(data: ByteArray): Boolean { rec("restore", data.toList()); return restoreOk }
         override fun nativeAchievements(): Array<String>? { rec("achievements"); return achievements }
         override fun nativeLeaderboards(): Array<String>? { rec("leaderboards"); return null }
         override fun nativeHashRom(data: ByteArray): String? = null
@@ -163,6 +164,32 @@ class RaEngineTest {
     }
 
     // 3 / 4 -----------------------------------------------------------
+
+    @Test
+    fun `progress restored before the session is up is applied once it loads`() = runBlocking {
+        started()
+        fake.restoreOk = false
+        RaEngine.coreLock.withLock {
+            RaEngine.loadGame("hash")
+            RaEngine.restoreProgress(byteArrayOf(1))
+            RaEngine.restoreProgress(byteArrayOf(2))
+        }
+        fake.restoreOk = true
+        RaEngine.coreLock.withLock { RaEngine.handleGameLoaded(0, null, "Zelda", 12) }
+        assertEquals(listOf(listOf<Byte>(1), listOf<Byte>(2), listOf<Byte>(2)), fake.named("restore").map { it.args[0] })
+
+        // Applied once, and a game with no set drops what was held.
+        RaEngine.coreLock.withLock {
+            RaEngine.handleGameLoaded(0, null, "Zelda", 12)
+            RaEngine.loadGame("other")
+            fake.restoreOk = false
+            RaEngine.restoreProgress(byteArrayOf(3))
+            RaEngine.handleGameLoaded(-1, "no set", null, 0)
+            fake.restoreOk = true
+            RaEngine.handleGameLoaded(0, null, "Other", 1)
+        }
+        assertEquals(4, fake.named("restore").size)
+    }
 
     @Test
     fun `an aborted game load leaves the current game alone`() {
