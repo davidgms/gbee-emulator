@@ -165,6 +165,20 @@ jobs:
         working-directory: android
         run: gradle assembleDebug
 
+      # Unsigned, on every push and PR: R8 runs only in release, and the .so
+      # files are gitignored, so this is the only place a stripped JNI method
+      # or a bundle without one of the ARM slices shows up before Play does.
+      - name: Build release bundle and check both ABIs
+        working-directory: android
+        run: |
+          gradle bundleRelease
+          aab=app/build/outputs/bundle/release/app-release.aab
+          for abi in arm64-v8a armeabi-v7a; do
+            for lib in gbee_core gbee_ra; do
+              unzip -l "$aab" | grep -q "base/lib/$abi/lib$lib.so" || { echo "::error::$aab has no $abi/lib$lib.so"; exit 1; }
+            done
+          done
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
