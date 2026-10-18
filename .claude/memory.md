@@ -1476,3 +1476,14 @@ of Mario Tennis, Yggdra and Celeste identical after 1500 frames.
   loop, restore into a fresh machine, compare the trace. Use it when adding cross-step state.
 - A layout change moves tail offsets in: `core/tests/state_restore.rs` (`LIVE_LEN`), `core/tests/saves.rs`
   (absurd-length test, `- 43`), `savestate.rs` unit tests, and `StateTransfer.kt` `STATE_VERSIONS`.
+
+## 2026-10-17 - Phase 5 boundary re-audit (rust-engineer)
+
+- The v10 ROM CRC check only runs for `version >= 10` (`savestate.rs:416`), so a state whose version
+  field says 6..9 skips it; `StateTransfer.kt` imports any 6..11 state. Proven in
+  `temp/phase5/probes2/src/bin/boundary.rs`; details in `temp/phase5/rust-engineer.md` (P5-RE-1).
+- rcheevos achievement/leaderboard lists hold raw pointers into the loaded game and
+  `rc_client_unload_game` frees it after dropping its mutex: a list must be built *and read* under
+  the same lock that serialises unload (`RaEngine.coreLock`), or the strings are freed under it (P5-RE-2).
+- `nativeServerResponse` has no size cap in C and the body is not NUL-terminated; the 16 MiB cap is
+  Kotlin-only (`RaEngine.kt` `MAX_RESPONSE_BYTES`).
