@@ -567,7 +567,15 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
     private fun loadExistingSave() {
         val store = batterySave ?: return
         val bytes = store.load() ?: return
-        engine.writeSave(bytes)
+        if (!engine.writeSave(bytes)) {
+            // The core refused the save, so its save memory is not this file.
+            // Drop the store: a later flush would otherwise write that memory
+            // over the player's good .sav.
+            batterySave = null
+            Log.e(TAG, "Battery save rejected by the core; saves are off for this session")
+            _stateMessage.value = "Could not load the game save - saving is off until you reopen the game"
+            return
+        }
         Log.d(TAG, "Loaded battery save from ${store.file}")
         Log.i(TAG, "Loaded battery save (${bytes.size} bytes)")
     }

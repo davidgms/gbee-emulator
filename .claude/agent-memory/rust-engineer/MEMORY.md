@@ -36,3 +36,4 @@ here pointing at it.
 - **2026-10-12** - [load_save 0xFF fill, save_fit rule, jni_exports test misses one-line `@JvmStatic external fun` (project memory)](../../memory.md)
 - **2026-10-14** - [Per-field mutation proof and git-archive pre-fix run](2026-10-14-per-field-mutation-proof.md)
 - **2026-10-14** - [State v11 live-state fields, derived/skipped ones, tail-offset sites (project memory)](../../memory.md)
+- **2026-10-17** - [Host-testing JNI-only ffi.rs logic: helper + old-behaviour red stage; audio buffer 8100](2026-10-17-testing-jni-only-logic-on-host.md)

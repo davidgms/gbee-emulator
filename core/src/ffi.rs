@@ -63,7 +63,42 @@ pub unsafe extern "C" fn gbee_destroy(ptr: *mut c_void) {
 /// trade: a frontend can report an error and offer to reload, which beats the
 /// app vanishing mid-game with no message and no chance to save.
 fn guarded<T>(fallback: T, f: impl FnOnce() -> T) -> T {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(fallback)
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        // Once per process: a panic that repeats every frame would flood logcat.
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            log::error!("[GBee] core panicked; the machine may be inconsistent");
+        }
+        fallback
+    })
+}
+
+/// `f` as a C status: 0 when it returned, -1 when it panicked.
+fn guarded_status(f: impl FnOnce()) -> i32 {
+    guarded(-1, || {
+        f();
+        0
+    })
+}
+
+/// Largest peek: the biggest readable region, External Work RAM (256 KB).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const MAX_PEEK_BYTES: usize = 256 * 1024;
+/// Largest audio copy. Kotlin asks for 810 samples a frame times 10 (8x fast
+/// forward plus 2 spare), 8100 floats; this leaves 8x headroom.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+const MAX_AUDIO_SAMPLES: usize = 1 << 16;
+
+/// A Kotlin-supplied buffer length as a `usize`, clamped to `cap`, or `None`
+/// when it is not positive. Sizes a Vec, and an allocation failure aborts the
+/// process. Clamped rather than refused, so a larger Kotlin buffer still gets
+/// a capped copy instead of silence.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn jni_len(requested: i32, cap: usize) -> Option<usize> {
+    usize::try_from(requested)
+        .ok()
+        .filter(|&n| n >= 1)
+        .map(|n| n.min(cap))
 }
 
 /// Load a ROM image and power-cycle the machine. Returns 0 on success, -1 if
@@ -370,7 +405,8 @@ pub unsafe extern "C" fn gbee_save_read(ptr: *mut c_void, out: *mut u8, max_len:
     count
 }
 
-/// Restore a battery save. Returns 0 on success, -1 on a null argument.
+/// Restore a battery save. Returns 0 on success, -1 on a null argument or a
+/// caught panic.
 ///
 /// # Safety
 /// `ptr` must be a valid handle and `data` must point to `len` readable bytes.
@@ -381,8 +417,7 @@ pub unsafe extern "C" fn gbee_save_write(ptr: *mut c_void, data: *const u8, len:
     }
     let handle = unsafe { &mut *(ptr as *mut GbaHandle) };
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-    guarded((), || handle.inner.load_save(bytes));
-    0
+    guarded_status(|| handle.inner.load_save(bytes))
 }
 
 /// Whether save memory changed since the last call, clearing the flag.
@@ -728,10 +763,10 @@ pub mod android {
         out: JByteArray,
         len: jint,
     ) -> jint {
-        if handle == 0 || len <= 0 {
+        let Some(len) = jni_len(len, MAX_PEEK_BYTES).filter(|_| handle != 0) else {
             return 0;
-        }
-        let mut buf = vec![0u8; len as usize];
+        };
+        let mut buf = vec![0u8; len];
         let count = unsafe {
             gbee_peek_memory(
                 handle as *mut c_void,
@@ -755,19 +790,15 @@ pub mod android {
         out: JFloatArray,
         max_samples: jint,
     ) -> jint {
-        // `<= 0` and not `== 0`: a negative jint cast to usize is about 2^64,
-        // and `vec!` of that aborts the process on capacity overflow.
-        if handle == 0 || max_samples <= 0 {
+        // A negative or huge jint would size a multi-GiB Vec, and an
+        // allocation failure aborts the process past any `guarded`.
+        let Some(max_samples) = jni_len(max_samples, MAX_AUDIO_SAMPLES).filter(|_| handle != 0)
+        else {
             return 0;
-        }
-        let mut buf = vec![0.0f32; max_samples as usize];
-        let count = unsafe {
-            gbee_audio_copy(
-                handle as *mut c_void,
-                buf.as_mut_ptr(),
-                max_samples as usize,
-            )
         };
+        let mut buf = vec![0.0f32; max_samples];
+        let count =
+            unsafe { gbee_audio_copy(handle as *mut c_void, buf.as_mut_ptr(), max_samples) };
         let _ = env.set_float_array_region(&out, 0, &buf[..count]);
         count as jint
     }
@@ -978,5 +1009,29 @@ pub mod android {
         // Through the C ABI, so the parse runs inside `guarded`.
         let (ptr, len) = (bytes.as_ptr() as *const u8, bytes.len());
         unsafe { gbee_state_write(handle as *mut c_void, ptr, len) }
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn a_panicking_save_write_reports_failure() {
+        assert_eq!(guarded_status(|| {}), 0);
+        assert_eq!(guarded_status(|| panic!("load_save")), -1);
+    }
+
+    #[test]
+    fn a_kotlin_length_past_the_cap_is_clamped() {
+        assert_eq!(jni_len(0, 16), None);
+        assert_eq!(jni_len(-1, 16), None);
+        assert_eq!(jni_len(16, 16), Some(16));
+        assert_eq!(jni_len(17, 16), Some(16));
+        assert_eq!(
+            jni_len(i32::MAX, MAX_AUDIO_SAMPLES),
+            Some(MAX_AUDIO_SAMPLES)
+        );
+        assert_eq!(jni_len(i32::MAX, MAX_PEEK_BYTES), Some(MAX_PEEK_BYTES));
     }
 }
