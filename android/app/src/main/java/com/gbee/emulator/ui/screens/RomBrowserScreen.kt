@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.gbee.emulator.data.RomArtwork
 import com.gbee.emulator.data.CoverArt
 import com.gbee.emulator.data.DisplaySettings
+import com.gbee.emulator.data.DuplicateChoices
+import com.gbee.emulator.data.duplicateGroups
 import com.gbee.emulator.data.Favorites
 import com.gbee.emulator.data.LastPlayed
 import com.gbee.emulator.data.RelativeTime
@@ -92,7 +94,7 @@ enum class RomSortOrder(val label: String) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RomBrowserScreen(
-    roms: List<RomEntry>,
+    scanned: List<RomEntry>,
     onRomClick: (RomEntry) -> Unit,
     onSettingsClick: () -> Unit,
     onRefresh: () -> Unit = {},
@@ -106,6 +108,12 @@ fun RomBrowserScreen(
     val displaySettings = remember { DisplaySettings(context) }
     var downloadCovers by remember { mutableStateOf(displaySettings.getDownloadCoverArt()) }
     var askCovers by remember { mutableStateOf(false) }
+    // Copies hidden since the last scan; the next scan leaves them out itself.
+    val duplicateChoices = remember { DuplicateChoices(context) }
+    var hiddenNow by remember { mutableStateOf(emptySet<String>()) }
+    var answers by remember { mutableIntStateOf(0) }
+    val roms = remember(scanned, hiddenNow) { scanned.filterNot { it.filePath in hiddenNow } }
+    val duplicates = remember(roms, answers) { duplicateGroups(roms, duplicateChoices.settled()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -181,6 +189,13 @@ fun RomBrowserScreen(
                 }
             },
         )
+    }
+    duplicates.firstOrNull()?.takeIf { !askCovers }?.let { group ->
+        DuplicateDialog(group) { keep ->
+            duplicateChoices.resolve(group, keep)
+            if (keep != null) hiddenNow = hiddenNow + (group.map { it.filePath } - keep.filePath)
+            answers++
+        }
     }
     Scaffold(
         topBar = {
@@ -560,6 +575,49 @@ private fun SheetItem(
         Spacer(modifier = Modifier.width(20.dp))
         Text(label, color = PineGlowMist, fontSize = 15.sp)
     }
+}
+
+/**
+ * "Which copy do you keep?" for one game found as several files. No way out
+ * but an answer: the answer is what stops the question coming back.
+ */
+@Composable
+private fun DuplicateDialog(group: List<RomEntry>, onKeep: (RomEntry?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        containerColor = NightPanel,
+        titleContentColor = GoldenSaplight,
+        textContentColor = PineGlowMist,
+        title = { Text("Same game found twice", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${group.first().name} is in your folders more than once. " +
+                        "Pick the file to keep. GBee hides the other and does not ask again.",
+                    fontSize = 13.sp,
+                )
+                for (rom in group) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onKeep(rom) }
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(12.dp),
+                    ) {
+                        Text(rom.fileName, color = GoldenSaplight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${rom.folderLabel ?: File(rom.filePath).parent.orEmpty()} - ${rom.size}",
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onKeep(null) }) { Text("Keep both", color = PineGlowMist) }
+        },
+    )
 }
 
 /** One prompt shape for both deletions, so they cannot drift apart. */

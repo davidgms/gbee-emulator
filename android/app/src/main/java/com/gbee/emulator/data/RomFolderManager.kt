@@ -86,6 +86,7 @@ class RomFolderManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("rom_folders", Context.MODE_PRIVATE)
     private val lastPlayed = LastPlayed(context)
     private val favorites = Favorites(context)
+    private val duplicates = DuplicateChoices(context)
 
     /**
      * The configured folders (tree Uris and legacy paths), sorted.
@@ -200,6 +201,10 @@ class RomFolderManager(private val context: Context) {
                 legacyDocId(r.filePath)?.let { id -> treeRoots.any { docIdContains(it, id) } } == true
         }
         roms += missingEntries(roms.map { it.filePath }.toSet())
+        // After the missing rows, so a hidden copy that was once played does
+        // not come back as a missing one.
+        val hidden = duplicates.hidden()
+        roms.removeAll { it.filePath in hidden }
         return Scan(roms.sortedBy { it.name.lowercase() }, siblings, down)
     }
 

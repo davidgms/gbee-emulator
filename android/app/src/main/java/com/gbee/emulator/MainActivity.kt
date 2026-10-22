@@ -92,7 +92,7 @@ fun GBeeNavHost() {
 
         composable("rom_browser") {
             RomBrowserScreen(
-                roms = romList,
+                scanned = romList,
                 onRomClick = { rom ->
                     navController.navigate("emulation/${RomBytes.encodeId(rom.filePath)}")
                 },
