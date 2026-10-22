@@ -36,4 +36,14 @@ class DuplicatesTest {
         val gone = rom("Mario Tennis.gba", exists = false)
         assertEquals(emptyList<List<RomEntry>>(), duplicateGroups(listOf(rom("Mario Tennis.zip"), gone), emptySet()))
     }
+
+    @Test
+    fun `a hidden copy stays hidden only while another copy is listed`() {
+        val zip = rom("Mario Tennis.zip")
+        val gba = rom("Mario Tennis.gba")
+        val hidden = setOf(zip.filePath)
+        assertEquals(listOf(gba), withoutHidden(listOf(zip, gba), hidden))
+        // The kept .gba was deleted: the .zip comes back instead of the game vanishing.
+        assertEquals(listOf(zip), withoutHidden(listOf(zip), hidden))
+    }
 }

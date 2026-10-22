@@ -203,9 +203,8 @@ class RomFolderManager(private val context: Context) {
         roms += missingEntries(roms.map { it.filePath }.toSet())
         // After the missing rows, so a hidden copy that was once played does
         // not come back as a missing one.
-        val hidden = duplicates.hidden()
-        roms.removeAll { it.filePath in hidden }
-        return Scan(roms.sortedBy { it.name.lowercase() }, siblings, down)
+        val shown = withoutHidden(roms, duplicates.hidden())
+        return Scan(shown.sortedBy { it.name.lowercase() }, siblings, down)
     }
 
     /** @return false if the tree's root could not be read. */

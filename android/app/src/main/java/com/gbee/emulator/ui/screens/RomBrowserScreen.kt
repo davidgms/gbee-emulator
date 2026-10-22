@@ -50,6 +50,7 @@ import com.gbee.emulator.data.CoverArt
 import com.gbee.emulator.data.DisplaySettings
 import com.gbee.emulator.data.DuplicateChoices
 import com.gbee.emulator.data.duplicateGroups
+import com.gbee.emulator.data.withoutHidden
 import com.gbee.emulator.data.Favorites
 import com.gbee.emulator.data.LastPlayed
 import com.gbee.emulator.data.RelativeTime
@@ -110,9 +111,9 @@ fun RomBrowserScreen(
     var askCovers by remember { mutableStateOf(false) }
     // Copies hidden since the last scan; the next scan leaves them out itself.
     val duplicateChoices = remember { DuplicateChoices(context) }
-    var hiddenNow by remember { mutableStateOf(emptySet<String>()) }
+    var hiddenNow by remember(scanned) { mutableStateOf(emptySet<String>()) }
     var answers by remember { mutableIntStateOf(0) }
-    val roms = remember(scanned, hiddenNow) { scanned.filterNot { it.filePath in hiddenNow } }
+    val roms = remember(scanned, hiddenNow) { withoutHidden(scanned, hiddenNow) }
     val duplicates = remember(roms, answers) { duplicateGroups(roms, duplicateChoices.settled()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {

@@ -24,11 +24,21 @@ internal fun duplicateGroups(roms: List<RomEntry>, settled: Set<String>): List<L
         .filter { it.size > 1 && groupId(it) !in settled }
 
 /**
+ * [roms] without the [hidden] copies - but only while a copy of the same
+ * game is still listed. If the kept file is deleted or its folder removed,
+ * the hidden one comes back rather than the game vanishing with no row.
+ */
+internal fun withoutHidden(roms: List<RomEntry>, hidden: Set<String>): List<RomEntry> {
+    val shown = roms.filter { it.exists && it.filePath !in hidden }.mapTo(HashSet(), ::duplicateKey)
+    return roms.filterNot { it.filePath in hidden && duplicateKey(it) in shown }
+}
+
+/**
  * The player's answers to "which copy do you keep?". [hidden] are the copies
  * left out of the list; [settled] are groups where both were kept. Both
  * persist, so a rescan does not ask about the same files twice.
  */
-class DuplicateChoices(context: Context) {
+class DuplicateChoices(private val context: Context) {
     private val prefs = context.getSharedPreferences("duplicates", Context.MODE_PRIVATE)
 
     fun hidden(): Set<String> = prefs.getStringSet(HIDDEN, emptySet()) ?: emptySet()
@@ -43,6 +53,10 @@ class DuplicateChoices(context: Context) {
         } else {
             val drop = group.map { it.filePath } - keep.filePath
             prefs.edit().putStringSet(HIDDEN, hidden() + drop).apply()
+            // The game's star and last-played time follow it onto the copy kept.
+            val moved = drop.associateWith { keep.filePath }
+            LastPlayed(context).rekey(moved)
+            Favorites(context).rekey(moved)
         }
     }
 
