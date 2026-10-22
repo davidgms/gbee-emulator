@@ -53,7 +53,7 @@ fun GBeeNavHost() {
     val scope = rememberCoroutineScope()
 
     var romList by remember { mutableStateOf<List<RomEntry>>(emptyList()) }
-    fun rescanRoms() {
+    fun rescanRoms(onDone: () -> Unit = {}) {
         // Tree folders carry their own grant. A path folder left from before
         // SAF cannot be read any more and shows as "Needs re-pick" in Settings.
         scope.launch(Dispatchers.IO) {
@@ -61,6 +61,7 @@ fun GBeeNavHost() {
             // there too, on the list it just published: battery saves are
             // moving into app storage while the app can still read the folders.
             folderManager.scanAndImport(publish = { romList = it })
+            withContext(Dispatchers.Main) { onDone() }
         }
     }
 
@@ -100,6 +101,7 @@ fun GBeeNavHost() {
                     navController.navigate("settings")
                 },
                 onRefresh = { rescanRoms() },
+                onReload = { done -> rescanRoms(done) },
             )
         }
 

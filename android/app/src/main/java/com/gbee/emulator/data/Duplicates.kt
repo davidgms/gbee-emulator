@@ -60,6 +60,11 @@ class DuplicateChoices(private val context: Context) {
         }
     }
 
+    /** Forget every answer, so the next scan asks about each game found twice again. */
+    fun reset() {
+        prefs.edit().clear().apply()
+    }
+
     private companion object {
         const val HIDDEN = "hidden_paths"
         const val SETTLED = "kept_groups"

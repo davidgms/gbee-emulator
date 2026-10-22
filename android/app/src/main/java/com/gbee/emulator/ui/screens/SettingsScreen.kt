@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Environment
 
 import android.widget.Toast
+import com.gbee.emulator.data.DuplicateChoices
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -360,6 +361,25 @@ fun SettingsScreen(
                     fontSize = 13.sp,
                     color = AmberResin,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            SettingsSection(title = "Duplicates") {
+                SettingsItem(
+                    icon = Icons.Default.ContentCopy,
+                    title = "Check Duplicates Again",
+                    subtitle = "Ask again which file to keep for each game found twice",
+                    onClick = {
+                        // A redo, not an undo: hidden copies come back on the
+                        // rescan and the home screen asks about each one again.
+                        DuplicateChoices(context).reset()
+                        onFoldersChanged()
+                        if (openGame == null) {
+                            onBack()
+                        } else {
+                            Toast.makeText(context, "The questions show on the game list", Toast.LENGTH_LONG).show()
+                        }
+                    },
                 )
             }
 

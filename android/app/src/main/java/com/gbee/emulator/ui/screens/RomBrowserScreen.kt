@@ -5,6 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import java.io.File
 import com.gbee.emulator.data.RomHeader
@@ -99,6 +105,8 @@ fun RomBrowserScreen(
     onRomClick: (RomEntry) -> Unit,
     onSettingsClick: () -> Unit,
     onRefresh: () -> Unit = {},
+    /** A rescan the player asked for; calls back on the main thread when it ends. */
+    onReload: (onDone: () -> Unit) -> Unit = { it() },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -146,11 +154,26 @@ fun RomBrowserScreen(
     var confirmDeleteSaves by remember { mutableStateOf<RomEntry?>(null) }
     var confirmDeleteRom by remember { mutableStateOf<RomEntry?>(null) }
     var favoritesOnly by remember { mutableStateOf(false) }
-    // The scan is a coroutine on an IO dispatcher and gives no completion
-    // signal back, so the spinner is held for a beat rather than until the
-    // list changes: a rescan that finds nothing new changes nothing, and a
-    // spinner waiting for that would never stop.
     val refreshState = rememberPullToRefreshState()
+    // The reload button and the pull share one rescan, with a toast at each
+    // end so a scan that finds nothing new still reads as done.
+    var reloading by remember { mutableStateOf(false) }
+    fun reload(onDone: () -> Unit = {}) {
+        if (reloading) return
+        reloading = true
+        Toast.makeText(context, "Reloading games...", Toast.LENGTH_SHORT).show()
+        onReload {
+            reloading = false
+            onDone()
+            Toast.makeText(context, "Games list updated", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val spin by rememberInfiniteTransition(label = "reload").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
+        label = "reload",
+    )
     var sortOrder by remember { mutableStateOf(RomSortOrder.LAST_PLAYED_DESC) }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
@@ -278,11 +301,12 @@ fun RomBrowserScreen(
                             }
                         }
                     }
-                    IconButton(onClick = onRefresh) {
+                    IconButton(onClick = { reload() }) {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "Rescan ROM folders",
-                            tint = AmberResin
+                            tint = AmberResin,
+                            modifier = Modifier.rotate(if (reloading) spin else 0f),
                         )
                     }
                     IconButton(onClick = onSettingsClick) {
@@ -416,9 +440,7 @@ fun RomBrowserScreen(
 
     if (refreshState.isRefreshing) {
         LaunchedEffect(Unit) {
-            onRefresh()
-            kotlinx.coroutines.delay(600)
-            refreshState.endRefresh()
+            reload { refreshState.endRefresh() }
         }
     }
 
