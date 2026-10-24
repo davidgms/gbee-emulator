@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>Yükleniyor...</item>
+        <item>Vızıldıyor...</item>
+        <item>Oynanıyor...</item>
+        <item>İlerliyor...</item>
+        <item>Bal yapılıyor...</item>
+        <item>Tozlaşıyor...</item>
+        <item>Kovana giriliyor...</item>
+        <item>Kanat çırpılıyor...</item>
+        <item>Açılıyor...</item>
+        <item>Göz kırpılıyor...</item>
+        <item>Pikselleniyor...</item>
+        <item>Oğul veriliyor...</item>
+    </string-array>
+</resources>

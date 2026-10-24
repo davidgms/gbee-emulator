@@ -1,5 +1,6 @@
 package com.gbee.emulator.viewmodel
 
+import com.gbee.emulator.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -13,14 +14,17 @@ import org.junit.Test
 class SlotNameTest {
 
     @Test
-    fun `slot zero is the quick save slot`() {
-        assertEquals("quick save slot", EmulationViewModel.slotName(0))
+    fun `slot zero is the quick save message`() {
+        assertEquals(R.string.state_saved_quick, EmulationViewModel.slotMessage(0, R.string.state_saved_quick, R.string.state_saved_slot))
     }
 
     @Test
-    fun `every other slot is named by its own index`() {
+    fun `every other slot is numbered by its own index`() {
         for (slot in 1 until EmulationViewModel.SLOT_COUNT) {
-            assertEquals("slot $slot", EmulationViewModel.slotName(slot))
+            assertEquals(
+                R.string.state_saved_slot,
+                EmulationViewModel.slotMessage(slot, R.string.state_saved_quick, R.string.state_saved_slot),
+            )
         }
     }
 }

@@ -1,5 +1,8 @@
 package com.gbee.emulator.ui.screens
 
+import com.gbee.emulator.ui.storageLabel
+
+import androidx.annotation.StringRes
 import android.net.Uri
 import android.os.Environment
 
@@ -77,14 +80,16 @@ import com.gbee.emulator.ui.theme.*
  */
 private val FastForwardRatios = listOf(2, 4, 8, 0)
 
+@Composable
 private fun fastForwardLabel(ratio: Int): String =
-    if (ratio == 0) "Unlimited - no audio" else "${ratio}x"
+    if (ratio == 0) stringResource(R.string.fast_forward_unlimited) else stringResource(R.string.fast_forward_ratio, ratio)
 
-private val ScaleMode.label: String
+@get:StringRes
+private val ScaleMode.label: Int
     get() = when (this) {
-        ScaleMode.FIT -> "Fit"
-        ScaleMode.INTEGER -> "Integer (Pixel Perfect)"
-        ScaleMode.STRETCH -> "Stretch"
+        ScaleMode.FIT -> R.string.scale_fit
+        ScaleMode.INTEGER -> R.string.scale_integer
+        ScaleMode.STRETCH -> R.string.scale_stretch
     }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -144,7 +149,7 @@ fun SettingsScreen(
     var showSpeedMenu by remember { mutableStateOf(false) }
     var muteFastForward by remember { mutableStateOf(displaySettings.getMuteOnFastForward()) }
     var interframeBlend by remember { mutableStateOf(displaySettings.getInterframeBlend()) }
-    var folderError by remember { mutableStateOf<String?>(null) }
+    var folderError by remember { mutableStateOf<Int?>(null) }
 
     // The picker keeps the tree Uri (and a persistable grant) instead of
     // turning it into a path, which is what stops working without all-files
@@ -163,7 +168,7 @@ fun SettingsScreen(
                         onFoldersChanged()
                         folderError = null
                     } else {
-                        folderError = "Could not keep access to that folder. Try picking it again."
+                        folderError = R.string.folder_access_failed
                     }
                 }
             }
@@ -226,14 +231,14 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "Settings",
+                        text = stringResource(R.string.settings_title),
                         fontWeight = FontWeight.Bold,
                         color = GoldenSaplight,
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "Back", tint = PineGlowMist)
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = PineGlowMist)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -251,7 +256,7 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SettingsSection(title = "ROM Folders") {
+            SettingsSection(title = stringResource(R.string.settings_rom_folders)) {
                 if (folders.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -260,21 +265,21 @@ fun SettingsScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            text = "No folders added yet",
+                            text = stringResource(R.string.folders_empty),
                             fontSize = 14.sp,
                             color = PineGlowMist.copy(alpha = 0.5f),
                         )
                     }
                 } else {
                     folders.forEach { path ->
-                        val displayName = RomFolderManager.folderLabel(path).substringAfterLast('/')
+                        val displayName = storageLabel(RomFolderManager.folderLabel(path)).substringAfterLast('/')
                         // A path folder on shared storage cannot be read
                         // without a storage permission, which the app no
                         // longer has: it needs picking again.
                         val repick = RomBytes.isPath(path) && legacyDocId(path) != null
                         val problem = when {
-                            repick -> "Needs re-pick: tap to grant access again"
-                            path in unavailable -> "Folder unavailable: tap to pick it again"
+                            repick -> stringResource(R.string.folder_needs_repick)
+                            path in unavailable -> stringResource(R.string.folder_unavailable)
                             else -> null
                         }
                         Row(
@@ -303,7 +308,7 @@ fun SettingsScreen(
                                     color = PineGlowMist,
                                 )
                                 Text(
-                                    text = RomFolderManager.folderLabel(path),
+                                    text = storageLabel(RomFolderManager.folderLabel(path)),
                                     fontSize = 11.sp,
                                     color = PineGlowMist.copy(alpha = 0.4f),
                                 )
@@ -323,7 +328,7 @@ fun SettingsScreen(
                             }) {
                                 Icon(
                                     Icons.Default.Close,
-                                    contentDescription = "Remove",
+                                    contentDescription = stringResource(R.string.remove),
                                     tint = Error,
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -348,7 +353,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.width(16.dp))
                     Text(
-                        text = "Add ROM Folder",
+                        text = stringResource(R.string.add_rom_folder),
                         fontSize = 16.sp,
                         color = AmberResin,
                     )
@@ -357,18 +362,18 @@ fun SettingsScreen(
 
             folderError?.let { message ->
                 Text(
-                    text = message,
+                    text = stringResource(message),
                     fontSize = 13.sp,
                     color = AmberResin,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 )
             }
 
-            SettingsSection(title = "Duplicates") {
+            SettingsSection(title = stringResource(R.string.settings_duplicates)) {
                 SettingsItem(
                     icon = Icons.Default.ContentCopy,
-                    title = "Check Duplicates Again",
-                    subtitle = "Ask again which file to keep for each game found twice",
+                    title = stringResource(R.string.duplicates_recheck_title),
+                    subtitle = stringResource(R.string.duplicates_recheck_subtitle),
                     onClick = {
                         // A redo, not an undo: hidden copies come back on the
                         // rescan and the home screen asks about each one again.
@@ -377,7 +382,7 @@ fun SettingsScreen(
                         if (openGame == null) {
                             onBack()
                         } else {
-                            AppToast.show("The questions show on the game list")
+                            AppToast.show(context.getString(R.string.duplicates_recheck_toast))
                         }
                     },
                 )
@@ -403,12 +408,12 @@ fun SettingsScreen(
                 )
             }
 
-            SettingsSection(title = "Display") {
+            SettingsSection(title = stringResource(R.string.settings_display)) {
                 Box {
                     SettingsItem(
                         icon = Icons.Default.Star,
-                        title = "Screen Scale",
-                        subtitle = scaleMode.label,
+                        title = stringResource(R.string.screen_scale),
+                        subtitle = stringResource(scaleMode.label),
                         onClick = { showScaleMenu = true }
                     )
                     DropdownMenu(
@@ -418,7 +423,7 @@ fun SettingsScreen(
                     ) {
                         ScaleMode.entries.forEach { mode ->
                             DropdownMenuItem(
-                                text = { Text(mode.label) },
+                                text = { Text(stringResource(mode.label)) },
                                 onClick = {
                                     scaleMode = mode
                                     displaySettings.setScaleMode(mode)
@@ -431,8 +436,8 @@ fun SettingsScreen(
                 Box {
                     SettingsItem(
                         icon = Icons.Default.Tune,
-                        title = "Screen Filter",
-                        subtitle = screenFilter.label,
+                        title = stringResource(R.string.screen_filter),
+                        subtitle = stringResource(screenFilter.label),
                         onClick = { showFilterMenu = true }
                     )
                     DropdownMenu(
@@ -442,7 +447,7 @@ fun SettingsScreen(
                     ) {
                         ScreenFilter.entries.forEach { f ->
                             DropdownMenuItem(
-                                text = { Text(f.label) },
+                                text = { Text(stringResource(f.label)) },
                                 onClick = {
                                     screenFilter = f
                                     displaySettings.setScreenFilter(f)
@@ -454,8 +459,8 @@ fun SettingsScreen(
                 }
                 SettingsSwitch(
                     icon = Icons.Default.BlurOn,
-                    title = "Frame Blending",
-                    subtitle = "Smooths flicker, like the GBA screen",
+                    title = stringResource(R.string.frame_blending_title),
+                    subtitle = stringResource(R.string.frame_blending_subtitle),
                     checked = interframeBlend,
                     onCheckedChange = { checked ->
                         interframeBlend = checked
@@ -464,11 +469,13 @@ fun SettingsScreen(
                 )
                 SettingsSlider(
                     icon = Icons.Default.OpenInFull,
-                    title = "Control Size",
+                    title = stringResource(R.string.control_size),
                     // Shrink only - at 1.0 the row already fills the width,
                     // so growing pushes L, R and the outer D-pad off-screen.
-                    subtitle = "%.2fx".format(controlScale) +
-                        if (controlScale < 1.0f) " (below the 48.dp touch target)" else "",
+                    subtitle = stringResource(
+                        if (controlScale < 1.0f) R.string.control_size_small else R.string.control_size_value,
+                        controlScale,
+                    ),
                     value = controlScale,
                     range = DisplaySettings.MIN_CONTROL_SCALE..1.0f,
                     onValueChange = { controlScale = it },
@@ -476,8 +483,8 @@ fun SettingsScreen(
                 )
                 SettingsSlider(
                     icon = Icons.Default.Opacity,
-                    title = "Control Opacity",
-                    subtitle = "%d%%".format((controlOpacity * 100).toInt()),
+                    title = stringResource(R.string.control_opacity),
+                    subtitle = stringResource(R.string.percent_value, (controlOpacity * 100).toInt()),
                     value = controlOpacity,
                     range = DisplaySettings.MIN_CONTROL_OPACITY..1.0f,
                     onValueChange = { controlOpacity = it },
@@ -486,8 +493,8 @@ fun SettingsScreen(
                 Box {
                     SettingsItem(
                         icon = Icons.Default.StayCurrentPortrait,
-                        title = "Orientation",
-                        subtitle = orientation.label,
+                        title = stringResource(R.string.orientation),
+                        subtitle = stringResource(orientation.label),
                         onClick = { showOrientationMenu = true }
                     )
                     DropdownMenu(
@@ -497,7 +504,7 @@ fun SettingsScreen(
                     ) {
                         ScreenOrientation.entries.forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(option.label) },
+                                text = { Text(stringResource(option.label)) },
                                 onClick = {
                                     orientation = option
                                     displaySettings.setScreenOrientation(option)
@@ -511,8 +518,8 @@ fun SettingsScreen(
                 }
                 SettingsSwitch(
                     icon = Icons.Default.Fullscreen,
-                    title = "Hide System Bars",
-                    subtitle = "Status bar and navigation bar, while a game runs",
+                    title = stringResource(R.string.hide_system_bars_title),
+                    subtitle = stringResource(R.string.hide_system_bars_subtitle),
                     checked = fullscreen,
                     onCheckedChange = { checked ->
                         fullscreen = checked
@@ -521,8 +528,8 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.BatteryStd,
-                    title = "Clock & Battery",
-                    subtitle = "Along the bottom while playing",
+                    title = stringResource(R.string.status_strip_title),
+                    subtitle = stringResource(R.string.status_strip_subtitle),
                     checked = showStatusStrip,
                     onCheckedChange = { checked ->
                         showStatusStrip = checked
@@ -531,8 +538,8 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.Speed,
-                    title = "Show FPS, screen Hz and audio underruns",
-                    subtitle = "A diagnostic, over the black above the picture",
+                    title = stringResource(R.string.performance_title),
+                    subtitle = stringResource(R.string.performance_subtitle),
                     checked = showPerf,
                     onCheckedChange = { checked ->
                         showPerf = checked
@@ -541,9 +548,8 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.Speed,
-                    title = "Low screen rate tip",
-                    subtitle = "Tell me when the phone holds the screen below 60 Hz " +
-                        "during a game (Xiaomi phones do)",
+                    title = stringResource(R.string.rate_tip_title),
+                    subtitle = stringResource(R.string.rate_tip_subtitle),
                     checked = rateTip,
                     onCheckedChange = { checked ->
                         rateTip = checked
@@ -552,9 +558,8 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.RestartAlt,
-                    title = "Resume from quick save",
-                    subtitle = "Opening a game jumps back into slot 0 instead " +
-                        "of the title screen",
+                    title = stringResource(R.string.auto_load_title),
+                    subtitle = stringResource(R.string.auto_load_subtitle),
                     checked = autoLoad,
                     onCheckedChange = { checked ->
                         autoLoad = checked
@@ -563,13 +568,11 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.Image,
-                    title = "Download cover art",
+                    title = stringResource(R.string.cover_art_title),
                     // Says where it goes and who owns what arrives, because
                     // this is the only thing in the app that reaches the
                     // network on its own once it is on.
-                    subtitle = "From thumbnails.libretro.com, for games with " +
-                        "no picture beside them. The art belongs to each " +
-                        "game's publisher.",
+                    subtitle = stringResource(R.string.cover_art_subtitle),
                     checked = coverArt,
                     onCheckedChange = { checked ->
                         coverArt = checked
@@ -579,12 +582,11 @@ fun SettingsScreen(
                 if (coverArt || coverCacheBytes > 0) {
                     SettingsItem(
                         icon = Icons.Default.DeleteSweep,
-                        title = "Clear downloaded covers",
+                        title = stringResource(R.string.cover_clear_title),
                         subtitle = if (coverCacheBytes > 0) {
-                            "%.1f MB cached. Also retries games that had none."
-                                .format(coverCacheBytes / 1024.0 / 1024.0)
+                            stringResource(R.string.cover_clear_cached, coverCacheBytes / 1024.0 / 1024.0)
                         } else {
-                            "Nothing cached yet"
+                            stringResource(R.string.cover_clear_empty)
                         },
                         onClick = {
                             CoverArt.clearCache(context)
@@ -594,7 +596,7 @@ fun SettingsScreen(
                 }
             }
 
-            SettingsSection(title = "RetroAchievements") {
+            SettingsSection(title = stringResource(R.string.retroachievements)) {
                 // Started here as well as when a game opens: signing in
                 // happens with no ROM loaded, and without this the client did
                 // not exist yet and the first attempt went nowhere at all.
@@ -603,40 +605,38 @@ fun SettingsScreen(
                 if (!RaEngine.isAvailable()) {
                     SettingsInfo(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Not available in this build",
-                        subtitle = "The achievements library was not compiled in",
+                        title = stringResource(R.string.ra_unavailable_title),
+                        subtitle = stringResource(R.string.ra_unavailable_subtitle),
                     )
                 } else if (raUser == null) {
                     SettingsItem(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Sign in",
+                        title = stringResource(R.string.ra_sign_in),
                         // Says whose account it is and what is kept, because
                         // asking for a password deserves both.
-                        subtitle = "Your own retroachievements.org account. " +
-                            "The password is used once and never stored.",
+                        subtitle = stringResource(R.string.ra_sign_in_subtitle),
                         onClick = { showRaLogin = true },
                     )
                 } else {
                     SettingsInfo(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Signed in as $raUser",
-                        subtitle = "Achievements unlock while you play. " +
-                            "Hardcore is off - see docs/achievements.md.",
+                        title = stringResource(R.string.ra_signed_in_as, raUser.orEmpty()),
+                        subtitle = stringResource(R.string.ra_signed_in_subtitle),
                     )
                     SettingsItem(
                         icon = Icons.Default.ExitToApp,
-                        title = "Sign out",
-                        subtitle = "Forgets the stored login token",
+                        title = stringResource(R.string.ra_sign_out_title),
+                        subtitle = stringResource(R.string.ra_sign_out_subtitle),
                         onClick = { RaEngine.logout() },
                     )
                 }
             }
 
-            SettingsSection(title = "Emulation") {
+            SettingsSection(title = stringResource(R.string.settings_emulation)) {
                 Box {
                     SettingsItem(
                         icon = Icons.Default.FastForward,
-                        title = "Fast Forward Speed",
+                        title = stringResource(R.string.fast_forward_speed),
                         subtitle = fastForwardLabel(fastForwardRatio),
                         onClick = { showSpeedMenu = true }
                     )
@@ -659,8 +659,8 @@ fun SettingsScreen(
                 }
                 SettingsSwitch(
                     icon = Icons.Default.VolumeOff,
-                    title = "Mute Fast Forward",
-                    subtitle = "Silence while speeding up",
+                    title = stringResource(R.string.mute_fast_forward_title),
+                    subtitle = stringResource(R.string.mute_fast_forward_subtitle),
                     checked = muteFastForward,
                     onCheckedChange = { checked ->
                         muteFastForward = checked
@@ -669,14 +669,14 @@ fun SettingsScreen(
                 )
             }
 
-            SettingsSection(title = "Audio") {
+            SettingsSection(title = stringResource(R.string.settings_audio)) {
                 SettingsSlider(
                     icon = Icons.Default.VolumeDown,
-                    title = "Volume",
+                    title = stringResource(R.string.volume),
                     // Separate from the system volume on purpose: an emulator
                     // is often played alongside something else, and turning
                     // the whole phone down is the wrong tool.
-                    subtitle = "${(volume * 100).toInt()}% - takes effect on the next game",
+                    subtitle = stringResource(R.string.volume_subtitle, (volume * 100).toInt()),
                     value = volume,
                     range = 0f..1f,
                     onValueChange = { volume = it },
@@ -684,8 +684,8 @@ fun SettingsScreen(
                 )
                 SettingsSwitch(
                     icon = Icons.Default.VolumeUp,
-                    title = "Sound",
-                    subtitle = "Enable audio output",
+                    title = stringResource(R.string.sound_title),
+                    subtitle = stringResource(R.string.sound_subtitle),
                     checked = soundEnabled,
                     onCheckedChange = { checked ->
                         soundEnabled = checked
@@ -698,18 +698,18 @@ fun SettingsScreen(
                 // builds - AudioOutput drives an AudioTrack directly.
                 SettingsInfo(
                     icon = Icons.Default.MusicNote,
-                    title = "Audio Backend",
-                    subtitle = "AudioTrack - ${AudioOutput.SAMPLE_RATE} Hz mono, low latency",
+                    title = stringResource(R.string.audio_backend_title),
+                    subtitle = stringResource(R.string.audio_backend_subtitle, AudioOutput.SAMPLE_RATE),
                 )
             }
 
-            SettingsSection(title = "Controls") {
+            SettingsSection(title = stringResource(R.string.settings_controls)) {
                 Box {
                     SettingsItem(
                         icon = Icons.Default.Gamepad,
-                        title = "Layout",
+                        title = stringResource(R.string.layout),
                         subtitle = layouts.firstOrNull { it.id == defaultLayoutId }?.name
-                            ?: "Default",
+                            ?: stringResource(R.string.layout_default),
                         onClick = {
                             layouts = layoutStore.getLayouts()
                             showLayoutMenu = true
@@ -735,8 +735,8 @@ fun SettingsScreen(
                 Box {
                     SettingsItem(
                         icon = Icons.Default.Palette,
-                        title = "Button Colour",
-                        subtitle = controlTint.label,
+                        title = stringResource(R.string.button_colour),
+                        subtitle = stringResource(controlTint.label),
                         onClick = { showTintMenu = true }
                     )
                     DropdownMenu(
@@ -746,7 +746,7 @@ fun SettingsScreen(
                     ) {
                         ControlTint.entries.forEach { tint ->
                             DropdownMenuItem(
-                                text = { Text(tint.label) },
+                                text = { Text(stringResource(tint.label)) },
                                 onClick = {
                                     controlTint = tint
                                     displaySettings.setControlTint(tint)
@@ -759,8 +759,8 @@ fun SettingsScreen(
                 Box {
                     SettingsItem(
                         icon = Icons.Default.FormatSize,
-                        title = "Button Text Size",
-                        subtitle = controlFont.label,
+                        title = stringResource(R.string.button_text_size),
+                        subtitle = stringResource(controlFont.label),
                         onClick = { showFontMenu = true }
                     )
                     DropdownMenu(
@@ -770,7 +770,7 @@ fun SettingsScreen(
                     ) {
                         ControlFontSize.entries.forEach { size ->
                             DropdownMenuItem(
-                                text = { Text(size.label) },
+                                text = { Text(stringResource(size.label)) },
                                 onClick = {
                                     controlFont = size
                                     displaySettings.setControlFontSize(size)
@@ -783,8 +783,8 @@ fun SettingsScreen(
                 Box {
                     SettingsItem(
                         icon = Icons.Default.Vibration,
-                        title = "Vibration",
-                        subtitle = haptics.label,
+                        title = stringResource(R.string.vibration),
+                        subtitle = stringResource(haptics.label),
                         onClick = { showHapticMenu = true }
                     )
                     DropdownMenu(
@@ -794,7 +794,7 @@ fun SettingsScreen(
                     ) {
                         HapticStrength.entries.forEach { strength ->
                             DropdownMenuItem(
-                                text = { Text(strength.label) },
+                                text = { Text(stringResource(strength.label)) },
                                 onClick = {
                                     haptics = strength
                                     displaySettings.setHapticStrength(strength)
@@ -806,11 +806,11 @@ fun SettingsScreen(
                 }
                 SettingsSlider(
                     icon = Icons.Default.ControlCamera,
-                    title = "D-Pad Diagonals",
+                    title = stringResource(R.string.dpad_diagonals),
                     // Shown as how wide a diagonal is, not as the internal
                     // half-angle: "45 degrees of diagonal" is something a
                     // thumb can picture, "30 degrees of cardinal half" is not.
-                    subtitle = "%.0f degrees wide".format(90f - dpadCardinal * 2f),
+                    subtitle = stringResource(R.string.dpad_diagonals_value, 90f - dpadCardinal * 2f),
                     // Reversed: dragging right should widen the diagonal, and
                     // the number that widens it is the one that shrinks.
                     value = DisplaySettings.MAX_DPAD_CARDINAL_HALF - dpadCardinal,
@@ -827,17 +827,17 @@ fun SettingsScreen(
                 // yet, so the row is shown disabled instead of pointing at pairing.
                 SettingsItem(
                     icon = Icons.Default.Bluetooth,
-                    title = "Bluetooth Controller",
-                    subtitle = "Coming soon!",
+                    title = stringResource(R.string.bluetooth_title),
+                    subtitle = stringResource(R.string.bluetooth_subtitle),
                     onClick = { },
                     enabled = false,
                 )
             }
 
-            SettingsSection(title = "About") {
+            SettingsSection(title = stringResource(R.string.settings_about)) {
                 SettingsItem(
                     icon = Icons.Default.Info,
-                    title = "GBee Emulator",
+                    title = stringResource(R.string.app_name),
                     subtitle = "v0.1.0",
                     onClick = { }
                 )
@@ -1109,7 +1109,7 @@ private fun GamePickerDialog(
                             .padding(vertical = 10.dp),
                     ) {
                         Text(rom.name, fontSize = 15.sp)
-                        rom.folderLabel?.let { Text(it, fontSize = 11.sp, color = PineGlowMist.copy(alpha = 0.6f)) }
+                        rom.folderLabel?.let { Text(storageLabel(it), fontSize = 11.sp, color = PineGlowMist.copy(alpha = 0.6f)) }
                     }
                 }
             }
@@ -1131,32 +1131,31 @@ private fun RaLoginDialog(onDismiss: () -> Unit) {
     // Closes itself when the sign-in lands, rather than making the player
     // dismiss a dialog that has already done its job.
     LaunchedEffect(user) { if (user != null) onDismiss() }
-    LaunchedEffect(Unit) { RaEngine.loginError.collect { error = it } }
+    val signInFailed = stringResource(R.string.ra_sign_in_failed)
+    LaunchedEffect(Unit) { RaEngine.loginError.collect { error = it ?: signInFailed } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text("RetroAchievements", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.retroachievements), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Sign in with your own account from retroachievements.org. " +
-                        "The password is sent once to get a login token; only " +
-                        "the token is kept on this phone.",
+                    stringResource(R.string.ra_login_explainer),
                     fontSize = 12.sp,
                 )
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it; error = null },
-                    label = { Text("Username") },
+                    label = { Text(stringResource(R.string.ra_username)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it; error = null },
-                    label = { Text("Password") },
+                    label = { Text(stringResource(R.string.ra_password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
@@ -1167,10 +1166,10 @@ private fun RaLoginDialog(onDismiss: () -> Unit) {
             TextButton(
                 onClick = { RaEngine.login(username.trim(), password) },
                 enabled = username.isNotBlank() && password.isNotBlank(),
-            ) { Text("Sign in", color = GoldenSaplight) }
+            ) { Text(stringResource(R.string.ra_sign_in), color = GoldenSaplight) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = PineGlowMist) }
         },
     )
 }

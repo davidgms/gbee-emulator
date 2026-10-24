@@ -1,5 +1,8 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.StringRes
+import com.gbee.emulator.R
+
 /**
  * How large the letters on the on-screen buttons are drawn.
  *
@@ -12,8 +15,8 @@ package com.gbee.emulator.data
  * A and B are 20sp inside a big circle, START and SELECT are 13sp inside a
  * narrow pill, and a single sp value for both would break one of them.
  */
-enum class ControlFontSize(val label: String, val scale: Float) {
-    SMALL("Small", 0.85f),
-    MEDIUM("Medium", 1.0f),
-    LARGE("Large", 1.25f),
+enum class ControlFontSize(@StringRes val label: Int, val scale: Float) {
+    SMALL(R.string.font_size_small, 0.85f),
+    MEDIUM(R.string.font_size_medium, 1.0f),
+    LARGE(R.string.font_size_large, 1.25f),
 }

@@ -1,5 +1,8 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.StringRes
+import com.gbee.emulator.R
+
 /**
  * Every button of the touch overlay a player can drag independently.
  *
@@ -24,14 +27,14 @@ enum class ControlButton {
     SELECT,
     ;
 
-    val label: String
+    @get:StringRes val label: Int
         get() = when (this) {
-            DPAD -> "D-Pad"
-            BUTTON_A -> "A"
-            BUTTON_B -> "B"
-            SHOULDER_L -> "L"
-            SHOULDER_R -> "R"
-            START -> "Start"
-            SELECT -> "Select"
+            DPAD -> R.string.button_dpad
+            BUTTON_A -> R.string.button_a
+            BUTTON_B -> R.string.button_b
+            SHOULDER_L -> R.string.button_l
+            SHOULDER_R -> R.string.button_r
+            START -> R.string.button_start
+            SELECT -> R.string.button_select
         }
 }

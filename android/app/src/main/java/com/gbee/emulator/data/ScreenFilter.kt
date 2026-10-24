@@ -1,5 +1,8 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.StringRes
+import com.gbee.emulator.R
+
 /**
  * How the 240x160 frame is post-processed before it reaches the screen.
  *
@@ -39,11 +42,11 @@ enum class ScreenFilter {
     SAI_2X,
     ;
 
-    val label: String
+    @get:StringRes val label: Int
         get() = when (this) {
-            NONE -> "None (pixel perfect)"
-            SMOOTH -> "Smooth (bilinear)"
-            SCANLINES -> "Scanlines (CRT)"
-            SAI_2X -> "2xSaI (2x, smoothed)"
+            NONE -> R.string.filter_none
+            SMOOTH -> R.string.filter_smooth
+            SCANLINES -> R.string.filter_scanlines
+            SAI_2X -> R.string.filter_sai
         }
 }

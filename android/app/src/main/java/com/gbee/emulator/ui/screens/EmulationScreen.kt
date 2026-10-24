@@ -1,5 +1,7 @@
 package com.gbee.emulator.ui.screens
 
+import com.gbee.emulator.R
+import androidx.compose.ui.res.stringResource
 import com.gbee.emulator.data.DisplaySettings
 import com.gbee.emulator.ui.RateTip
 import androidx.lifecycle.LifecycleEventObserver
@@ -356,16 +358,23 @@ fun EmulationScreen(
     LaunchedEffect(raGame) {
         val loaded = raGame ?: return@LaunchedEffect
         raEarned = RaEngine.achievements().count { it.unlocked }
-        raNotice = "${loaded.title} - ${loaded.achievementCount} achievements"
+        raNotice = context.resources.getQuantityString(
+            R.plurals.ra_game_loaded, loaded.achievementCount, loaded.title, loaded.achievementCount,
+        )
     }
     val raTrackers by RaEngine.trackers.collectAsState()
     LaunchedEffect(Unit) {
-        RaEngine.leaderboardNotice.collect { raNotice = it }
+        RaEngine.leaderboardNotice.collect {
+            raNotice = context.getString(
+                if (it.submitted) R.string.ra_leaderboard_submitted else R.string.ra_leaderboard_started,
+                it.title,
+            )
+        }
     }
     LaunchedEffect(Unit) {
         RaEngine.unlocks.collect { unlock ->
             raEarned = RaEngine.achievements().count { it.unlocked }
-            raNotice = "Achievement unlocked: ${unlock.title} (${unlock.points})"
+            raNotice = context.getString(R.string.ra_unlocked, unlock.title, unlock.points)
         }
     }
 
@@ -424,7 +433,7 @@ fun EmulationScreen(
         delay(RateTip.SETTLE_MS) // cancelled if the rate changes first
         if (RateTip.shouldShow(displayHz, rateTipEnabled, RateTip.shownThisRun, RateTip.SETTLE_MS)) {
             RateTip.shownThisRun = true
-            rateTipMessage = RateTip.MESSAGE.format(displayHz.roundToInt())
+            rateTipMessage = context.getString(R.string.rate_tip_message, displayHz.roundToInt())
         }
     }
 
@@ -479,7 +488,7 @@ fun EmulationScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, "Back", tint = PineGlowMist)
+                    Icon(Icons.Default.ArrowBack, stringResource(R.string.back), tint = PineGlowMist)
                 }
                 Spacer(modifier = Modifier.weight(1f))
 
@@ -491,17 +500,17 @@ fun EmulationScreen(
                     Icon(
                         if (soundEnabled) Icons.Default.VolumeUp
                         else Icons.Default.VolumeOff,
-                        contentDescription = if (soundEnabled) "Mute" else "Unmute",
+                        contentDescription = stringResource(if (soundEnabled) R.string.mute else R.string.unmute),
                         // Lit only when muted: the interesting state is the one
                         // that explains why a game went quiet.
                         tint = if (soundEnabled) PineGlowMist else GoldenSaplight,
                     )
                 }
                 IconButton(onClick = { onSaveState(0) }) {
-                    Icon(Icons.Default.Save, "Save state", tint = PineGlowMist)
+                    Icon(Icons.Default.Save, stringResource(R.string.save_state_description), tint = PineGlowMist)
                 }
                 IconButton(onClick = { onLoadState(0) }) {
-                    Icon(Icons.Default.FolderOpen, "Load state", tint = PineGlowMist)
+                    Icon(Icons.Default.FolderOpen, stringResource(R.string.load_state_description), tint = PineGlowMist)
                 }
                 Box(
                     modifier = Modifier
@@ -519,7 +528,7 @@ fun EmulationScreen(
                 ) {
                     Icon(
                         Icons.Default.FastRewind,
-                        "Rewind",
+                        stringResource(R.string.rewind),
                         tint = if (isRewinding) GoldenSaplight else PineGlowMist,
                     )
                 }
@@ -528,7 +537,7 @@ fun EmulationScreen(
                 IconButton(onClick = onFastForward) {
                     Icon(
                         Icons.Default.FastForward,
-                        "Fast forward",
+                        stringResource(R.string.fast_forward_description),
                         tint = if (fastForward) GoldenSaplight else PineGlowMist,
                     )
                 }
@@ -538,7 +547,7 @@ fun EmulationScreen(
                 }) {
                     Icon(
                         if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                        if (isPaused) "Resume" else "Pause",
+                        stringResource(if (isPaused) R.string.resume else R.string.pause),
                         tint = if (isPaused) GoldenSaplight else PineGlowMist,
                     )
                 }
@@ -549,30 +558,30 @@ fun EmulationScreen(
                 // away from the icon that summons it.
                 Box {
                     IconButton(onClick = { showMenu = !showMenu }) {
-                        Icon(Icons.Default.MoreVert, "Menu", tint = PineGlowMist)
+                        Icon(Icons.Default.MoreVert, stringResource(R.string.menu), tint = PineGlowMist)
                     }
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false },
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Save State") },
+                            text = { Text(stringResource(R.string.save_state)) },
                             onClick = { showMenu = false; onSaveState(0) },
                             leadingIcon = { Icon(Icons.Default.Save, null, tint = AmberResin) }
                         )
                         DropdownMenuItem(
-                            text = { Text("Load State") },
+                            text = { Text(stringResource(R.string.load_state)) },
                             onClick = { showMenu = false; onLoadState(0) },
                             leadingIcon = { Icon(Icons.Default.FolderOpen, null, tint = AmberResin) }
                         )
                         DropdownMenuItem(
-                            text = { Text("Save States...") },
+                            text = { Text(stringResource(R.string.save_states_menu)) },
                             onClick = { showMenu = false; showSlots = true },
                             leadingIcon = { Icon(Icons.Default.Bookmarks, null, tint = AmberResin) }
                         )
                         HorizontalDivider(color = NightEdge)
                         DropdownMenuItem(
-                            text = { Text("Customise Layout") },
+                            text = { Text(stringResource(R.string.customise_layout)) },
                             onClick = {
                                 showMenu = false
                                 layouts = layoutStore.getLayouts()
@@ -581,26 +590,26 @@ fun EmulationScreen(
                             leadingIcon = { Icon(Icons.Default.OpenWith, contentDescription = null) },
                         )
                         DropdownMenuItem(
-                            text = { Text("Reset game") },
+                            text = { Text(stringResource(R.string.reset_game)) },
                             onClick = { showMenu = false; confirmReset = true },
                             leadingIcon = {
                                 Icon(Icons.Default.RestartAlt, contentDescription = null)
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Achievements") },
+                            text = { Text(stringResource(R.string.achievements)) },
                             onClick = { showMenu = false; showAchievements = true },
                             leadingIcon = {
                                 Icon(Icons.Default.EmojiEvents, contentDescription = null)
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Screenshot") },
+                            text = { Text(stringResource(R.string.screenshot)) },
                             onClick = { showMenu = false; onScreenshot() },
                             leadingIcon = { Icon(Icons.Default.PhotoCamera, contentDescription = null) },
                         )
                         DropdownMenuItem(
-                            text = { Text("Settings") },
+                            text = { Text(stringResource(R.string.settings_title)) },
                             onClick = { showMenu = false; onSettings() },
                             leadingIcon = { Icon(Icons.Default.Settings, null, tint = AmberResin) }
                         )
@@ -851,7 +860,7 @@ fun EmulationScreen(
             LayoutEditBar(
                 selectionLabel = selectedCustomId
                     ?.let { id -> customButtons.firstOrNull { it.id == id }?.name }
-                    ?: selectedButton?.label,
+                    ?: selectedButton?.label?.let { stringResource(it) },
                 onResize = resizeSelected,
                 onDone = { saveLayoutEdits() },
                 onCancel = { discardLayoutEdits() },
@@ -887,21 +896,21 @@ fun EmulationScreen(
                 containerColor = NightPanel,
                 titleContentColor = GoldenSaplight,
                 textContentColor = PineGlowMist,
-                title = { Text("Unsaved layout changes", fontWeight = FontWeight.Bold) },
-                text = { Text("Save the changes to this layout before leaving?", fontSize = 13.sp) },
+                title = { Text(stringResource(R.string.layout_unsaved_title), fontWeight = FontWeight.Bold) },
+                text = { Text(stringResource(R.string.layout_unsaved_body), fontSize = 13.sp) },
                 confirmButton = {
                     TextButton(onClick = {
                         showLeaveEditConfirm = false
                         saveLayoutEdits()
                         onBack()
-                    }) { Text("Save", color = GoldenSaplight) }
+                    }) { Text(stringResource(R.string.save), color = GoldenSaplight) }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         showLeaveEditConfirm = false
                         discardLayoutEdits()
                         onBack()
-                    }) { Text("Don't save", color = PineGlowMist) }
+                    }) { Text(stringResource(R.string.dont_save), color = PineGlowMist) }
                 },
             )
         }
@@ -990,8 +999,11 @@ fun EmulationScreen(
         // no use. Down here the strip is the one band no control wants.
         performance?.let { stats ->
             Text(
-                text = "${stats.fps} fps  ${displayHz.roundToInt()} Hz" +
-                    if (stats.underruns > 0) "  ${stats.underruns} underruns" else "",
+                text = if (stats.underruns > 0) {
+                    stringResource(R.string.performance_underruns, stats.fps, displayHz.roundToInt(), stats.underruns)
+                } else {
+                    stringResource(R.string.performance, stats.fps, displayHz.roundToInt())
+                },
                 color = if (stats.underruns > 0) Error else LedGreen,
                 fontSize = 11.sp,
                 modifier = Modifier
@@ -1047,26 +1059,24 @@ fun EmulationScreen(
                 containerColor = NightPanel,
                 titleContentColor = GoldenSaplight,
                 textContentColor = PineGlowMist,
-                title = { Text("Reset game?", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.reset_game_title), fontWeight = FontWeight.Bold) },
                 // Says what survives as well as what is lost: the battery save
                 // is the thing a player is afraid of losing, and it is the
                 // thing a reset keeps.
                 text = {
                     Text(
-                        "The game restarts from the title screen. Anything " +
-                            "since your last in-game save is lost; the save " +
-                            "itself is kept, and so are your save states.",
+                        stringResource(R.string.reset_game_body),
                         fontSize = 13.sp,
                     )
                 },
                 confirmButton = {
                     TextButton(onClick = { confirmReset = false; onReset() }) {
-                        Text("Reset", color = Error)
+                        Text(stringResource(R.string.reset), color = Error)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { confirmReset = false }) {
-                        Text("Cancel", color = PineGlowMist)
+                        Text(stringResource(R.string.cancel), color = PineGlowMist)
                     }
                 },
             )
@@ -1129,9 +1139,9 @@ private fun ScreenContainer(
         } else if (errorMessage != null) {
             Text(text = errorMessage, color = Color.Red, fontSize = 14.sp)
         } else if (isLoading) {
-            Text(text = "Loading ROM...", color = AmberResin, fontSize = 14.sp)
+            Text(text = stringResource(R.string.loading_rom), color = AmberResin, fontSize = 14.sp)
         } else {
-            Text(text = "No ROM loaded", color = PineGlowMist, fontSize = 14.sp)
+            Text(text = stringResource(R.string.no_rom_loaded), color = PineGlowMist, fontSize = 14.sp)
         }
 
         if (isPaused) {
@@ -1144,12 +1154,12 @@ private fun ScreenContainer(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Default.Pause,
-                        contentDescription = null, // labelled by the "PAUSED" text below
+                        contentDescription = null, // labelled by the paused text below
                         tint = GoldenSaplight,
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("PAUSED", color = GoldenSaplight, fontSize = 20.sp)
+                    Text(stringResource(R.string.paused), color = GoldenSaplight, fontSize = 20.sp)
                 }
             }
         }
@@ -1194,7 +1204,8 @@ private fun LayoutEditBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selectionLabel?.let { "$it selected" } ?: "Touch a button, then drag it",
+                text = selectionLabel?.let { stringResource(R.string.layout_edit_selected, it) }
+                    ?: stringResource(R.string.layout_edit_hint),
                 color = PineGlowMist,
                 fontSize = 14.sp,
                 maxLines = 1,
@@ -1205,7 +1216,7 @@ private fun LayoutEditBar(
             // makes the bar jump under the finger that is still dragging.
             val canResize = selectionLabel != null
             Text(
-                text = "Size",
+                text = stringResource(R.string.layout_edit_size),
                 color = if (canResize) PineGlowMist else PineGlowMist.copy(alpha = 0.3f),
                 fontSize = 14.sp,
             )
@@ -1215,7 +1226,7 @@ private fun LayoutEditBar(
             ) {
                 Icon(
                     Icons.Default.Remove,
-                    contentDescription = "Smaller",
+                    contentDescription = stringResource(R.string.layout_edit_smaller),
                     tint = if (canResize) AmberResin else PineGlowMist.copy(alpha = 0.3f),
                 )
             }
@@ -1225,7 +1236,7 @@ private fun LayoutEditBar(
             ) {
                 Icon(
                     Icons.Default.Add,
-                    contentDescription = "Bigger",
+                    contentDescription = stringResource(R.string.layout_edit_bigger),
                     tint = if (canResize) AmberResin else PineGlowMist.copy(alpha = 0.3f),
                 )
             }
@@ -1238,36 +1249,36 @@ private fun LayoutEditBar(
             IconButton(onClick = onCustomButtons) {
                 Icon(
                     Icons.Default.AddCircle,
-                    contentDescription = "Custom buttons",
+                    contentDescription = stringResource(R.string.custom_buttons),
                     tint = AmberResin,
                 )
             }
             IconButton(onClick = onUndo, enabled = canUndo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Undo,
-                    contentDescription = "Undo",
+                    contentDescription = stringResource(R.string.undo),
                     tint = if (canUndo) AmberResin else PineGlowMist.copy(alpha = 0.3f),
                 )
             }
             IconButton(onClick = onRedo, enabled = canRedo) {
                 Icon(
                     Icons.AutoMirrored.Filled.Redo,
-                    contentDescription = "Redo",
+                    contentDescription = stringResource(R.string.redo),
                     tint = if (canRedo) AmberResin else PineGlowMist.copy(alpha = 0.3f),
                 )
             }
             TextButton(onClick = onReset) {
-                Text("Reset", color = AmberResin)
+                Text(stringResource(R.string.reset), color = AmberResin)
             }
             // Cancel next to Done, not hidden behind the system back button:
             // Reset puts every control back at its base position, which is
             // not the same as abandoning the edit and keeping the layout that
             // was already saved.
             TextButton(onClick = onCancel) {
-                Text("Cancel", color = PineGlowMist)
+                Text(stringResource(R.string.cancel), color = PineGlowMist)
             }
             TextButton(onClick = onDone) {
-                Text("Done", color = GoldenSaplight, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.done), color = GoldenSaplight, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1767,6 +1778,7 @@ fun DPad(
     val cardinalHalf = LocalDpadCardinalHalf.current
     val controls = LocalControlPalette.current
     var held by remember { mutableStateOf(emptySet<Int>()) }
+    val directionPadDescription = stringResource(R.string.direction_pad)
 
     Box(
         modifier = modifier.movableControl(
@@ -1776,7 +1788,7 @@ fun DPad(
         Canvas(
             modifier = Modifier
                 .size(DPAD_SIZE)
-                .semantics { contentDescription = "Direction pad" }
+                .semantics { contentDescription = directionPadDescription }
                 // Keyed on editingLayout so flipping into the position editor
                 // cancels this block, which runs the `finally` below and
                 // releases anything still down. Dragging the pad must not
@@ -2185,10 +2197,10 @@ private fun AchievementsDialog(
         textContentColor = PineGlowMist,
         title = {
             Column {
-                Text("Achievements", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.achievements), fontWeight = FontWeight.Bold)
                 if (game != null && items.isNotEmpty()) {
                     Text(
-                        "$earned of ${items.size} earned - ${game.title}",
+                        stringResource(R.string.ra_earned_of, earned, items.size, game.title),
                         color = PineGlowMist,
                         fontSize = 12.sp,
                     )
@@ -2198,19 +2210,16 @@ private fun AchievementsDialog(
         text = {
             when {
                 !RaEngine.isAvailable() -> Text(
-                    "This build has no achievements support.",
+                    stringResource(R.string.ra_unsupported),
                     fontSize = 13.sp,
                 )
                 !signedIn -> Text(
-                    "Sign in to your retroachievements.org account in " +
-                        "Settings to track achievements.",
+                    stringResource(R.string.ra_sign_in_hint),
                     fontSize = 13.sp,
                 )
-                loaded == null -> Text("Loading achievements...", fontSize = 13.sp)
+                loaded == null -> Text(stringResource(R.string.ra_loading), fontSize = 13.sp)
                 items.isEmpty() -> Text(
-                    "RetroAchievements has no achievement set for this game. " +
-                        "About two thirds of the Game Boy Advance library has " +
-                        "none.",
+                    stringResource(R.string.ra_no_set),
                     fontSize = 13.sp,
                 )
                 else -> Column(
@@ -2224,7 +2233,7 @@ private fun AchievementsDialog(
                     }
                     if (boards.isNotEmpty()) {
                         Text(
-                            "Leaderboards",
+                            stringResource(R.string.ra_leaderboards),
                             color = AmberResin,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -2245,7 +2254,7 @@ private fun AchievementsDialog(
                             }
                         }
                         Text(
-                            "Achievements",
+                            stringResource(R.string.achievements),
                             color = AmberResin,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -2285,7 +2294,7 @@ private fun AchievementsDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = GoldenSaplight) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close), color = GoldenSaplight) }
         },
     )
 }
@@ -2312,7 +2321,7 @@ private fun SaveStateDialog(
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text("Save states", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.save_states_title), fontWeight = FontWeight.Bold) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -2322,7 +2331,11 @@ private fun SaveStateDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (slot.index == 0) "Quick save slot" else "Slot ${slot.index}",
+                                text = if (slot.index == 0) {
+                                    stringResource(R.string.slot_quick)
+                                } else {
+                                    stringResource(R.string.slot_numbered, slot.index)
+                                },
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = PineGlowMist,
@@ -2331,21 +2344,21 @@ private fun SaveStateDialog(
                                 text = if (slot.exists) {
                                     formatter.format(java.util.Date(slot.savedAt))
                                 } else {
-                                    "Empty"
+                                    stringResource(R.string.slot_empty)
                                 },
                                 fontSize = 11.sp,
                                 color = AmberResin,
                             )
                         }
                         TextButton(onClick = { onSave(slot.index) }) {
-                            Text("Save", color = GoldenSaplight, fontSize = 13.sp)
+                            Text(stringResource(R.string.save), color = GoldenSaplight, fontSize = 13.sp)
                         }
                         TextButton(
                             onClick = { onLoad(slot.index) },
                             enabled = slot.exists,
                         ) {
                             Text(
-                                "Load",
+                                stringResource(R.string.load),
                                 color = if (slot.exists) GoldenSaplight else AmberResin,
                                 fontSize = 13.sp,
                             )
@@ -2355,7 +2368,7 @@ private fun SaveStateDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = GoldenSaplight) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close), color = GoldenSaplight) }
         },
     )
 }
@@ -2391,11 +2404,13 @@ private fun LayoutsDialog(
         textContentColor = PineGlowMist,
         title = {
             Column {
-                Text("Control Layouts", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.layouts_title), fontWeight = FontWeight.Bold)
                 // Says why a layout the player remembers making is not on the
                 // list: it was saved for the other orientation.
                 Text(
-                    text = if (landscape) "Showing landscape layouts" else "Showing portrait layouts",
+                    text = stringResource(
+                        if (landscape) R.string.layouts_showing_landscape else R.string.layouts_showing_portrait,
+                    ),
                     color = PineGlowMist,
                     fontSize = 12.sp,
                 )
@@ -2429,21 +2444,21 @@ private fun LayoutsDialog(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = layout.orientation.label,
+                                text = stringResource(layout.orientation.label),
                                 color = AmberResin,
                                 fontSize = 11.sp,
                             )
                         }
                         IconButton(onClick = { onEdit(layout) }) {
-                            Icon(Icons.Default.OpenWith, "Edit positions", tint = AmberResin)
+                            Icon(Icons.Default.OpenWith, stringResource(R.string.layout_edit_positions), tint = AmberResin)
                         }
                         IconButton(onClick = { renamingLayout = layout }) {
-                            Icon(Icons.Default.Edit, "Rename", tint = AmberResin)
+                            Icon(Icons.Default.Edit, stringResource(R.string.rename), tint = AmberResin)
                         }
                         IconButton(onClick = { onDelete(layout) }, enabled = !layout.isDefault) {
                             Icon(
                                 Icons.Default.Delete,
-                                "Delete",
+                                stringResource(R.string.delete),
                                 tint = if (layout.isDefault) PineGlowMist.copy(alpha = 0.3f) else AmberResin,
                             )
                         }
@@ -2453,17 +2468,17 @@ private fun LayoutsDialog(
         },
         confirmButton = {
             TextButton(onClick = { creatingLayout = true }) {
-                Text("+ New Layout", color = GoldenSaplight)
+                Text(stringResource(R.string.layout_new_button), color = GoldenSaplight)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close), color = PineGlowMist) }
         },
     )
 
     renamingLayout?.let { layout ->
         LayoutNameDialog(
-            title = "Layout options",
+            title = stringResource(R.string.layout_options_title),
             initialName = layout.name,
             initialOrientation = layout.orientation,
             onConfirm = { name, orientation ->
@@ -2476,8 +2491,8 @@ private fun LayoutsDialog(
 
     if (creatingLayout) {
         LayoutNameDialog(
-            title = "New layout",
-            initialName = "Layout ${layouts.size + 1}",
+            title = stringResource(R.string.layout_new_title),
+            initialName = stringResource(R.string.layout_new_name, layouts.size + 1),
             // A layout made while holding the phone this way is for this way,
             // unless the player says otherwise.
             initialOrientation = if (landscape) LayoutOrientation.LANDSCAPE
@@ -2526,13 +2541,13 @@ private fun LayoutNameDialog(
                         cursorColor = AmberResin,
                     ),
                 )
-                Text("Shows up in", color = PineGlowMist, fontSize = 12.sp)
+                Text(stringResource(R.string.layout_shows_up_in), color = PineGlowMist, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     LayoutOrientation.entries.forEach { option ->
                         FilterChip(
                             selected = orientation == option,
                             onClick = { orientation = option },
-                            label = { Text(option.label, fontSize = 12.sp) },
+                            label = { Text(stringResource(option.label), fontSize = 12.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 labelColor = PineGlowMist,
                                 selectedContainerColor = AmberResin,
@@ -2546,10 +2561,10 @@ private fun LayoutNameDialog(
         confirmButton = {
             TextButton(
                 onClick = { onConfirm(name.trim().ifBlank { initialName }, orientation) },
-            ) { Text("Save", color = GoldenSaplight) }
+            ) { Text(stringResource(R.string.save), color = GoldenSaplight) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = PineGlowMist) }
         },
     )
 }
@@ -2619,7 +2634,7 @@ private fun StatusStrip(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.EmojiEvents,
-                    contentDescription = "Achievements",
+                    contentDescription = stringResource(R.string.achievements),
                     tint = GoldenSaplight.copy(alpha = 0.75f),
                     modifier = Modifier.size(12.dp),
                 )

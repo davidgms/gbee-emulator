@@ -1,5 +1,8 @@
 package com.gbee.emulator.ui.screens
 
+import com.gbee.emulator.ui.storageLabel
+
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import com.gbee.emulator.ui.relativeAgo
 import com.gbee.emulator.R
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
@@ -72,15 +76,15 @@ import androidx.compose.ui.text.style.TextAlign
 import com.gbee.emulator.ui.theme.*
 
 /** A sort order for the ROM list, plus the comparator that applies it. */
-enum class RomSortOrder(val label: String) {
-    LAST_PLAYED_DESC("Recently Played"),
-    LAST_PLAYED_ASC("Least Played"),
-    NAME_ASC("Name (A-Z)"),
-    NAME_DESC("Name (Z-A)"),
-    SIZE_DESC("Size (largest)"),
-    SIZE_ASC("Size (smallest)"),
-    DATE_DESC("Newest"),
-    DATE_ASC("Oldest");
+enum class RomSortOrder(@StringRes val label: Int) {
+    LAST_PLAYED_DESC(R.string.sort_recently_played),
+    LAST_PLAYED_ASC(R.string.sort_least_played),
+    NAME_ASC(R.string.sort_name_asc),
+    NAME_DESC(R.string.sort_name_desc),
+    SIZE_DESC(R.string.sort_size_desc),
+    SIZE_ASC(R.string.sort_size_asc),
+    DATE_DESC(R.string.sort_newest),
+    DATE_ASC(R.string.sort_oldest);
 
     fun sort(roms: List<RomEntry>): List<RomEntry> = when (this) {
         // There is no play-count, only a last-played time, so "least played"
@@ -158,10 +162,12 @@ fun RomBrowserScreen(
     // The reload button and the pull share one rescan, with a toast at each
     // end so a scan that finds nothing new still reads as done.
     var reloading by remember { mutableStateOf(false) }
+    val reloadingToast = stringResource(R.string.reloading_games)
+    val reloadedToast = stringResource(R.string.games_list_updated)
     fun reload(onDone: () -> Unit = {}) {
         if (reloading) return
         reloading = true
-        AppToast.show("Reloading games...")
+        AppToast.show(reloadingToast)
         val start = System.currentTimeMillis()
         onReload {
             // A small library scans in a few milliseconds; hold the spin and
@@ -170,7 +176,7 @@ fun RomBrowserScreen(
                 kotlinx.coroutines.delay(1_200 - (System.currentTimeMillis() - start))
                 reloading = false
                 onDone()
-                AppToast.show("Games list updated")
+                AppToast.show(reloadedToast)
             }
         }
     }
@@ -251,7 +257,7 @@ fun RomBrowserScreen(
                         // 2dp drop lines them up with the head itself: the
                         // antennae sit in the top of the face's 24dp box.
                         Text(
-                            text = "GBee Emulator",
+                            text = stringResource(R.string.app_name),
                             modifier = Modifier.offset(y = 2.dp),
                             color = GoldenSaplight,
                             maxLines = 1,
@@ -280,7 +286,9 @@ fun RomBrowserScreen(
                     IconButton(onClick = { favoritesOnly = !favoritesOnly }) {
                         Icon(
                             if (favoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = if (favoritesOnly) "Show all games" else "Show favourites only",
+                            contentDescription = stringResource(
+                                if (favoritesOnly) R.string.show_all_games else R.string.show_favourites_only,
+                            ),
                             tint = if (favoritesOnly) GoldenSaplight else AmberResin,
                         )
                     }
@@ -288,14 +296,14 @@ fun RomBrowserScreen(
                         IconButton(onClick = { sortMenuOpen = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = "Sort",
+                                contentDescription = stringResource(R.string.sort),
                                 tint = AmberResin
                             )
                         }
                         DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
                             RomSortOrder.entries.forEach { option ->
                                 DropdownMenuItem(
-                                    text = { Text(option.label) },
+                                    text = { Text(stringResource(option.label)) },
                                     onClick = {
                                         sortOrder = option
                                         sortMenuOpen = false
@@ -310,7 +318,7 @@ fun RomBrowserScreen(
                     IconButton(onClick = { reload() }) {
                         Icon(
                             Icons.Default.Refresh,
-                            contentDescription = "Rescan ROM folders",
+                            contentDescription = stringResource(R.string.rescan_rom_folders),
                             tint = AmberResin,
                             modifier = Modifier.rotate(if (reloading) spin else 0f),
                         )
@@ -318,7 +326,7 @@ fun RomBrowserScreen(
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             Icons.Default.Settings,
-                            contentDescription = "Settings",
+                            contentDescription = stringResource(R.string.settings_title),
                             tint = AmberResin
                         )
                     }
@@ -341,12 +349,12 @@ fun RomBrowserScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Filter games...") },
+                    placeholder = { Text(stringResource(R.string.filter_games)) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = if (query.isNotEmpty()) {
                         {
                             IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear filter")
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_filter))
                             }
                         }
                     } else null,
@@ -363,9 +371,9 @@ fun RomBrowserScreen(
                 if (visibleRoms.isEmpty()) {
                     Text(
                         text = if (favoritesOnly && query.isBlank()) {
-                            "No favourites yet. Long press a game to star it."
+                            stringResource(R.string.no_favourites)
                         } else {
-                            "No games match \"$query\""
+                            stringResource(R.string.no_games_match, query)
                         },
                         color = PineGlowMist.copy(alpha = 0.7f),
                         modifier = Modifier.padding(16.dp),
@@ -388,7 +396,7 @@ fun RomBrowserScreen(
                         if (favorites.isNotEmpty()) {
                             item {
                                 Text(
-                                    text = "Favorites",
+                                    text = stringResource(R.string.favorites),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = AmberResin,
@@ -412,7 +420,7 @@ fun RomBrowserScreen(
                         if (favorites.isNotEmpty() && rest.isNotEmpty()) {
                             item {
                                 Text(
-                                    text = "All games",
+                                    text = stringResource(R.string.all_games),
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = AmberResin,
@@ -474,17 +482,15 @@ fun RomBrowserScreen(
         }
         val found = files ?: return@let
         ConfirmDialog(
-            title = "Delete save data?",
+            title = stringResource(R.string.delete_saves_title),
             // Named, not counted: "3 files" is not something anyone can agree
             // to, and the battery save is the one that cannot be got back.
             body = if (found.isEmpty()) {
-                "${rom.name} has no save data on this phone."
+                stringResource(R.string.delete_saves_none, rom.name)
             } else {
-                "This removes the battery save and every save state for " +
-                    "${rom.name}, and cannot be undone:\n\n" +
-                    found.joinToString("\n") { it.name }
+                stringResource(R.string.delete_saves_body, rom.name, found.joinToString("\n") { it.name })
             },
-            confirmLabel = if (found.isEmpty()) "OK" else "Delete",
+            confirmLabel = stringResource(if (found.isEmpty()) R.string.ok else R.string.delete),
             destructive = found.isNotEmpty(),
             onConfirm = {
                 confirmDeleteSaves = null
@@ -500,15 +506,13 @@ fun RomBrowserScreen(
 
     confirmDeleteRom?.let { rom ->
         ConfirmDialog(
-            title = if (rom.exists) "Delete game?" else "Remove from list?",
+            title = stringResource(if (rom.exists) R.string.delete_game_title else R.string.remove_game_title),
             body = if (rom.exists) {
-                "This deletes ${rom.fileName} from this phone, along with its " +
-                    "save data and any cover art. It cannot be undone."
+                stringResource(R.string.delete_game_body, rom.fileName)
             } else {
-                "${rom.name} is already gone from storage. This only forgets " +
-                    "the row, so it stops appearing here."
+                stringResource(R.string.remove_game_body, rom.name)
             },
-            confirmLabel = if (rom.exists) "Delete" else "Remove",
+            confirmLabel = stringResource(if (rom.exists) R.string.delete else R.string.remove),
             destructive = rom.exists,
             onConfirm = {
                 confirmDeleteRom = null
@@ -524,7 +528,7 @@ fun RomBrowserScreen(
                     // A provider that will not delete is its own error; a
                     // path that fails stays as silent as it always was.
                     if (!deleted && !RomBytes.isPath(rom.filePath)) {
-                        AppToast.show("Could not delete ${rom.fileName}")
+                        AppToast.show(context.getString(R.string.delete_game_failed, rom.fileName))
                     }
                     onRefresh()
                 }
@@ -567,18 +571,18 @@ private fun RomActionsSheet(
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         if (rom.exists) {
-            SheetItem(Icons.Default.PlayArrow, "Play", onPlay)
+            SheetItem(Icons.Default.PlayArrow, stringResource(R.string.play), onPlay)
         }
         SheetItem(
             if (rom.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-            if (rom.isFavorite) "Remove from favourites" else "Add to favourites",
+            stringResource(if (rom.isFavorite) R.string.remove_from_favourites else R.string.add_to_favourites),
             onToggleFavorite,
         )
-        SheetItem(Icons.Default.Info, "Show information", onInfo)
-        SheetItem(Icons.Default.DeleteSweep, "Delete save data", onDeleteSaves)
+        SheetItem(Icons.Default.Info, stringResource(R.string.show_information), onInfo)
+        SheetItem(Icons.Default.DeleteSweep, stringResource(R.string.delete_saves), onDeleteSaves)
         SheetItem(
             Icons.Default.Delete,
-            if (rom.exists) "Delete game" else "Remove from list",
+            stringResource(if (rom.exists) R.string.delete_game else R.string.remove_from_list),
             onDeleteRom,
             tint = Error,
         )
@@ -617,12 +621,11 @@ private fun DuplicateDialog(group: List<RomEntry>, onKeep: (RomEntry?) -> Unit) 
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text("Same game found twice", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.duplicate_title), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "${group.first().name} is in your folders more than once. " +
-                        "Pick the file to keep. GBee hides the other and does not ask again.",
+                    stringResource(R.string.duplicate_body, group.first().name),
                     fontSize = 13.sp,
                 )
                 for (rom in group) {
@@ -636,7 +639,7 @@ private fun DuplicateDialog(group: List<RomEntry>, onKeep: (RomEntry?) -> Unit) 
                     ) {
                         Text(rom.fileName, color = GoldenSaplight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "${rom.folderLabel ?: File(rom.filePath).parent.orEmpty()} - ${rom.size}",
+                            "${rom.folderLabel?.let { storageLabel(it) } ?: File(rom.filePath).parent.orEmpty()} - ${rom.size}",
                             fontSize = 12.sp,
                         )
                     }
@@ -644,7 +647,7 @@ private fun DuplicateDialog(group: List<RomEntry>, onKeep: (RomEntry?) -> Unit) 
             }
         },
         confirmButton = {
-            TextButton(onClick = { onKeep(null) }) { Text("Keep both", color = PineGlowMist) }
+            TextButton(onClick = { onKeep(null) }) { Text(stringResource(R.string.duplicate_keep_both), color = PineGlowMist) }
         },
     )
 }
@@ -672,7 +675,7 @@ private fun ConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = PineGlowMist) }
         },
     )
 }
@@ -777,7 +780,7 @@ fun RomCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (rom.exists) "${rom.fileName} • ${rom.size}" else "File not found",
+                    text = if (rom.exists) "${rom.fileName} • ${rom.size}" else stringResource(R.string.file_not_found),
                     fontSize = 12.sp,
                     color = if (rom.exists) AmberResin else Error,
                     maxLines = 1,
@@ -789,7 +792,7 @@ fun RomCard(
                         // glance; "3 Sep, 21:41" is read by doing arithmetic
                         // against today. The exact time is still in the info
                         // dialog, one long press away.
-                        text = "Last played ${RelativeTime.ago(rom.lastPlayedMillis)}",
+                        text = stringResource(R.string.last_played, relativeAgo(RelativeTime.ago(rom.lastPlayedMillis))),
                         fontSize = 11.sp,
                         color = PineGlowMist.copy(alpha = 0.6f),
                     )
@@ -802,7 +805,7 @@ fun RomCard(
             if (rom.isFavorite) {
                 Icon(
                     Icons.Default.Favorite,
-                    contentDescription = "Favorite",
+                    contentDescription = stringResource(R.string.favorite),
                     tint = GoldenSaplight,
                     modifier = Modifier.size(20.dp)
                 )
@@ -820,8 +823,10 @@ private fun UnavailableFoldersBanner() {
     val down by RomFolderManager.unavailable.collectAsState()
     if (down.isEmpty()) return
     Text(
-        text = "Folder unavailable: " + down.joinToString { RomFolderManager.folderLabel(it) } +
-            ". Pick it again in Settings.",
+        text = stringResource(
+            R.string.folders_unavailable_banner,
+            down.map { storageLabel(RomFolderManager.folderLabel(it)) }.joinToString(),
+        ),
         color = Error,
         fontSize = 13.sp,
         modifier = Modifier
@@ -853,7 +858,7 @@ fun EmptyState(modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "No ROMs yet!",
+            text = stringResource(R.string.empty_title),
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = GoldenSaplight,
@@ -862,7 +867,7 @@ fun EmptyState(modifier: Modifier = Modifier) {
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Go to Settings → ROM Folders to add your game folders.\n\nBzzt! Your games await!",
+            text = stringResource(R.string.empty_body),
             fontSize = 14.sp,
             color = PineGlowMist.copy(alpha = 0.7f),
             lineHeight = 20.sp,
@@ -901,27 +906,28 @@ fun RomInfoDialog(rom: RomEntry, onDismiss: () -> Unit) {
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text("Game info", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.game_info_title), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                InfoRow("Name", rom.name)
-                InfoRow("File", rom.fileName)
-                InfoRow("Location", rom.folderLabel ?: File(rom.filePath).takeIf { RomBytes.isPath(rom.filePath) }?.parent ?: "-")
-                InfoRow("File size", rom.size)
-                InfoRow("Cartridge title", header?.title?.ifBlank { "-" } ?: "Reading...")
-                InfoRow("Game code", header?.gameCode?.ifBlank { "-" } ?: "Reading...")
+                val reading = stringResource(R.string.info_reading)
+                InfoRow(stringResource(R.string.info_name), rom.name)
+                InfoRow(stringResource(R.string.info_file), rom.fileName)
+                InfoRow(stringResource(R.string.info_location), rom.folderLabel?.let { storageLabel(it) } ?: File(rom.filePath).takeIf { RomBytes.isPath(rom.filePath) }?.parent ?: "-")
+                InfoRow(stringResource(R.string.info_file_size), rom.size)
+                InfoRow(stringResource(R.string.info_cartridge_title), header?.title?.ifBlank { "-" } ?: reading)
+                InfoRow(stringResource(R.string.info_game_code), header?.gameCode?.ifBlank { "-" } ?: reading)
                 InfoRow(
-                    "Last played",
-                    rom.lastPlayedMillis?.let { formatLastPlayed(it) } ?: "Never",
+                    stringResource(R.string.info_last_played),
+                    rom.lastPlayedMillis?.let { formatLastPlayed(it) } ?: stringResource(R.string.info_never),
                 )
                 if (rom.exists) {
-                    InfoRow("RetroAchievements ID", raHash ?: "Reading...")
+                    InfoRow(stringResource(R.string.info_ra_id), raHash ?: reading)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("OK", color = GoldenSaplight)
+                Text(stringResource(R.string.ok), color = GoldenSaplight)
             }
         },
     )

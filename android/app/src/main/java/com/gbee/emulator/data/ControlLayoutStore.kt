@@ -1,6 +1,7 @@
 package com.gbee.emulator.data
 
 import android.content.Context
+import com.gbee.emulator.R
 import java.util.UUID
 
 /**
@@ -16,7 +17,7 @@ import java.util.UUID
  * Plain SharedPreferences, matching [RomFolderManager] and [DisplaySettings] -
  * a handful of small values and short lists, not a case for a real database.
  */
-class ControlLayoutStore(context: Context) {
+class ControlLayoutStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("control_layouts", Context.MODE_PRIVATE)
 
     /** Every layout that exists, Default always first. */
@@ -276,7 +277,7 @@ class ControlLayoutStore(context: Context) {
     }
 
     private fun layoutName(id: String): String =
-        prefs.getString("$KEY_NAME_PREFIX$id", null) ?: if (id == DEFAULT_LAYOUT_ID) "Default" else id
+        prefs.getString("$KEY_NAME_PREFIX$id", null) ?: if (id == DEFAULT_LAYOUT_ID) context.getString(R.string.layout_default) else id
 
     companion object {
         const val DEFAULT_LAYOUT_ID = "default"

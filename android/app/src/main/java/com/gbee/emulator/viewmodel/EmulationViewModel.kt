@@ -4,8 +4,10 @@ import android.app.Application
 import android.hardware.display.DisplayManager
 import android.util.Log
 import android.view.Display
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.gbee.emulator.R
 import com.gbee.emulator.data.DisplaySettings
 import com.gbee.emulator.data.LastPlayed
 import com.gbee.emulator.data.RomHeader
@@ -149,14 +151,17 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         /**
-         * What a slot is called in a message, matching the slot list's labels.
+         * Which message to show for [slot], matching the slot list's labels.
          *
          * Slot 0 is the quick save the toolbar buttons use, and the rest are
-         * numbered by their index. The messages used to say `slot ${slot + 1}`,
-         * so saving into the row labelled "Slot 2" reported "slot 3".
+         * numbered by their index (the [numbered] message takes it as `%1$d`).
+         * The messages used to say `slot ${slot + 1}`, so saving into the row
+         * labelled "Slot 2" reported "slot 3". Two whole sentences rather than
+         * a translated slot name spliced into one, so word order can change.
          */
-        fun slotName(slot: Int): String =
-            if (slot == 0) "quick save slot" else "slot $slot"
+        @StringRes
+        fun slotMessage(slot: Int, @StringRes quick: Int, @StringRes numbered: Int): Int =
+            if (slot == 0) quick else numbered
 
         /**
          * A game saving touches thousands of bytes across many CPU cycles;
@@ -425,18 +430,18 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                 if (RomBytes.isPath(filePath) && !File(filePath).exists()) {
                     Log.d(TAG, "ROM not found: $filePath")
                     Log.e(TAG, "ROM not found")
-                    _errorMessage.value = "ROM file not found"
+                    _errorMessage.value = text(R.string.error_rom_not_found)
                     _isLoading.value = false
                     return@launch
                 }
                 val data = RomBytes.read(getApplication(), filePath)
                 if (data == null) {
-                    _errorMessage.value = "No .gba, .agb or .bin inside that zip"
+                    _errorMessage.value = text(R.string.error_zip_no_rom)
                     _isLoading.value = false
                     return@launch
                 }
                 if (data.size < 0xC0) {
-                    _errorMessage.value = "File too small (${data.size} bytes)"
+                    _errorMessage.value = text(R.string.error_file_too_small, data.size)
                     _isLoading.value = false
                     return@launch
                 }
@@ -476,9 +481,9 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                     if (!saveReady) {
                         romLoaded = false
                         _errorMessage.value = if (waitingForScan) {
-                            "Still reading your ROM folders. Try again in a moment."
+                            text(R.string.error_still_scanning)
                         } else {
-                            "Could not read this game's battery save. Nothing was changed; try again."
+                            text(R.string.error_battery_save_unreadable)
                         }
                         _isLoading.value = false
                         return@launch
@@ -495,13 +500,13 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                         loadState(0)
                     }
                 } else {
-                    _errorMessage.value = "Bad ROM header"
+                    _errorMessage.value = text(R.string.error_bad_header)
                     _isLoading.value = false
                 }
             } catch (e: Exception) {
                 Log.d(TAG, "Error loading ROM", e)
                 Log.e(TAG, "Error loading ROM: ${e.javaClass.simpleName}")
-                _errorMessage.value = "Error: ${e.message}"
+                _errorMessage.value = text(R.string.error_generic, e.message.orEmpty())
                 _isLoading.value = false
             }
         }
@@ -573,7 +578,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             // over the player's good .sav.
             batterySave = null
             Log.e(TAG, "Battery save rejected by the core; saves are off for this session")
-            _stateMessage.value = "Could not load the game save - saving is off until you reopen the game"
+            _stateMessage.value = text(R.string.state_save_rejected)
             return
         }
         Log.d(TAG, "Loaded battery save from ${store.file}")
@@ -848,7 +853,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             Log.e(TAG, "Battery save write failed")
             // The bytes stay pending and the next flush retries, but a player
             // who quits now loses the in-game save, so they have to be told.
-            _stateMessage.value = "Could not write the game save - is storage full?"
+            _stateMessage.value = text(R.string.state_save_write_failed)
         }
         return ok
     }
@@ -980,7 +985,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
     fun takeScreenshot() {
         val frame = _frameBuffer.value
         if (frame == null || frame.size < GbaEngine.FRAME_BUFFER_SIZE) {
-            _stateMessage.value = "No frame to capture yet"
+            _stateMessage.value = text(R.string.screenshot_no_frame)
             return
         }
         val name = "${romStateKey ?: "GBee"}_${System.currentTimeMillis()}.png"
@@ -999,10 +1004,10 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                 pixels, w, h, android.graphics.Bitmap.Config.ARGB_8888,
             )
             val message = try {
-                "Screenshot saved to ${saveScreenshot(bitmap, name)}"
+                text(R.string.screenshot_saved, saveScreenshot(bitmap, name))
             } catch (e: Exception) {
                 Log.e(TAG, "Screenshot failed", e)
-                "Could not save the screenshot: ${e.message}"
+                text(R.string.screenshot_failed, e.message.orEmpty())
             } finally {
                 bitmap.recycle()
             }
@@ -1028,7 +1033,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
         if (!romLoaded) return
         viewModelScope.launch(Dispatchers.Default) {
             engineLock.withLock { engine.reset() }
-            _stateMessage.value = "Game reset"
+            _stateMessage.value = text(R.string.state_game_reset)
         }
     }
 
@@ -1055,7 +1060,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
         val progress = RaEngine.serializeProgress()
         val bytes = engine.readState()
         if (bytes.isEmpty()) {
-            _stateMessage.value = "Failed to capture save state"
+            _stateMessage.value = text(R.string.state_capture_failed)
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1065,9 +1070,9 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
                 // would be restored onto a state it does not belong to.
                 val sidecar = achievementSidecar(slot)
                 if (progress != null) atomicWrite(sidecar, progress) else sidecar.delete()
-                _stateMessage.value = "Saved to ${slotName(slot)}"
+                _stateMessage.value = slotText(slot, R.string.state_saved_quick, R.string.state_saved_slot)
             } else {
-                _stateMessage.value = "Failed to write ${slotName(slot)}"
+                _stateMessage.value = slotText(slot, R.string.state_write_failed_quick, R.string.state_write_failed_slot)
             }
         }
     }
@@ -1082,7 +1087,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch(Dispatchers.IO) {
             val file = stateFile(slot)
             if (!file.exists()) {
-                _stateMessage.value = "Nothing in ${slotName(slot)}"
+                _stateMessage.value = slotText(slot, R.string.state_empty_quick, R.string.state_empty_slot)
                 return@launch
             }
             val bytes = try {
@@ -1090,7 +1095,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             } catch (e: Exception) {
                 Log.d(TAG, "Failed reading save state slot $slot", e)
                 Log.e(TAG, "Failed reading save state slot $slot: ${e.javaClass.simpleName}")
-                _stateMessage.value = "Could not read ${slotName(slot)}"
+                _stateMessage.value = slotText(slot, R.string.state_read_failed_quick, R.string.state_read_failed_slot)
                 return@launch
             }
             // Only read here; it is restored after the core accepts the
@@ -1113,7 +1118,7 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
     /** Runs on the engine thread (loop or the one-shot fallback above). */
     private fun applyStateBytes(bytes: ByteArray, sidecar: ByteArray?) {
         if (applyStateLoad(bytes, sidecar, engine::writeState, RaEngine::restoreProgress)) {
-            _stateMessage.value = "Save state loaded"
+            _stateMessage.value = text(R.string.state_loaded)
         } else {
             // `SaveState::restore` snapshots the machine and rolls back when
             // the parse fails, so a rejected load (wrong version, truncated
@@ -1121,9 +1126,15 @@ class EmulationViewModel(application: Application) : AndroidViewModel(applicatio
             // This used to call stopEmulation() and demand a ROM reload,
             // which killed a perfectly healthy session over a bad file.
             Log.e(TAG, "Save state load rejected; the machine is unchanged")
-            _stateMessage.value = "Save state incompatible or corrupt"
+            _stateMessage.value = text(R.string.state_incompatible)
         }
     }
+
+    private fun text(@StringRes id: Int, vararg args: Any): String =
+        getApplication<Application>().getString(id, *args)
+
+    private fun slotText(slot: Int, @StringRes quick: Int, @StringRes numbered: Int): String =
+        text(slotMessage(slot, quick, numbered), slot)
 
     fun clearStateMessage() {
         _stateMessage.value = null

@@ -1,5 +1,6 @@
 package com.gbee.emulator.ui.screens
 
+import androidx.compose.ui.res.stringResource
 import android.provider.Settings
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
@@ -103,7 +104,7 @@ fun SplashScreen(progress: Float, loaded: Boolean, onFinished: () -> Unit) {
             // glyph, so 22sp keeps "GBee Emulator" at 286dp, inside a 360dp
             // phone on one line.
             Text(
-                text = "GBee Emulator",
+                text = stringResource(R.string.app_name),
                 fontFamily = PressStart2P,
                 fontSize = 22.sp,
                 maxLines = 1,
@@ -113,7 +114,7 @@ fun SplashScreen(progress: Float, loaded: Boolean, onFinished: () -> Unit) {
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = "GBA Emulator",
+                text = stringResource(R.string.splash_subtitle),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Light,
                 color = PineGlowMist

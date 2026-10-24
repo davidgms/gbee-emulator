@@ -1,5 +1,7 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.PluralsRes
+import com.gbee.emulator.R
 import java.util.concurrent.TimeUnit
 
 /**
@@ -12,30 +14,37 @@ import java.util.concurrent.TimeUnit
 object RelativeTime {
 
     /**
+     * An age as a resource and a count, so the wording (and its plural forms)
+     * lives in strings.xml. [plural] is 0 for "just now", which has no count.
+     */
+    data class Age(@PluralsRes val plural: Int, val count: Int = 0) {
+        companion object {
+            val JUST_NOW = Age(0)
+        }
+    }
+
+    /**
      * How long ago [thenMillis] was, relative to [nowMillis].
      *
-     * Deliberately coarse and deliberately not localised beyond English: this
-     * is one subtitle in a list, and `DateUtils.getRelativeTimeSpanString`
-     * would drag in a `Context` for a string a test cannot then pin.
+     * Deliberately coarse: this is one subtitle in a list, and
+     * `DateUtils.getRelativeTimeSpanString` would drag in a `Context` for a
+     * value a test cannot then pin.
      */
-    fun ago(thenMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+    fun ago(thenMillis: Long, nowMillis: Long = System.currentTimeMillis()): Age {
         val delta = nowMillis - thenMillis
-        if (delta < 0) return "just now" // a clock that moved backwards, not the future
+        if (delta < 0) return Age.JUST_NOW // a clock that moved backwards, not the future
         val minutes = TimeUnit.MILLISECONDS.toMinutes(delta)
-        if (minutes < 1) return "just now"
-        if (minutes < 60) return plural(minutes, "minute")
+        if (minutes < 1) return Age.JUST_NOW
+        if (minutes < 60) return Age(R.plurals.ago_minutes, minutes.toInt())
         val hours = TimeUnit.MILLISECONDS.toHours(delta)
-        if (hours < 24) return plural(hours, "hour")
+        if (hours < 24) return Age(R.plurals.ago_hours, hours.toInt())
         val days = TimeUnit.MILLISECONDS.toDays(delta)
-        if (days < 7) return plural(days, "day")
-        if (days < 30) return plural(days / 7, "week")
+        if (days < 7) return Age(R.plurals.ago_days, days.toInt())
+        if (days < 30) return Age(R.plurals.ago_weeks, (days / 7).toInt())
         // Capped at 11: a 30-day month runs out before a 365-day year does,
         // so days 360 to 364 would otherwise read "12 months ago" - a phrase
         // that means a year while insisting it is not one.
-        if (days < 365) return plural((days / 30).coerceAtMost(11), "month")
-        return plural(days / 365, "year")
+        if (days < 365) return Age(R.plurals.ago_months, (days / 30).coerceAtMost(11).toInt())
+        return Age(R.plurals.ago_years, (days / 365).toInt())
     }
-
-    private fun plural(value: Long, unit: String): String =
-        if (value == 1L) "1 $unit ago" else "$value ${unit}s ago"
 }

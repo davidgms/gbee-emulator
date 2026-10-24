@@ -88,11 +88,14 @@ internal fun rekeyedTimes(times: Map<String, Long>, map: Map<String, String>): M
 internal fun rekeyedSet(keys: Set<String>, map: Map<String, String>): Set<String> =
     keys.mapTo(HashSet()) { map[it] ?: it }
 
+/** The root of `primary:` in a label; the UI swaps it for the player's language. */
+internal const val INTERNAL_STORAGE = "Internal storage"
+
 /** What a player recognises a folder by: the volume and the path inside it. */
 internal fun docIdLabel(docId: String): String {
     val volume = docId.substringBefore(':')
     val rel = docId.substringAfter(':', "").trim('/')
-    val root = if (volume == "primary") "Internal storage" else volume
+    val root = if (volume == "primary") INTERNAL_STORAGE else volume
     return if (rel.isEmpty()) root else "$root/$rel"
 }
 

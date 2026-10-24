@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>로딩 중...</item>
+        <item>붕붕 중...</item>
+        <item>게임 중...</item>
+        <item>어드밴스 중...</item>
+        <item>꿀 만드는 중...</item>
+        <item>꽃가루 나르는 중...</item>
+        <item>벌집 짓는 중...</item>
+        <item>파닥파닥 중...</item>
+        <item>부팅 중...</item>
+        <item>깜빡깜빡 중...</item>
+        <item>도트 찍는 중...</item>
+        <item>벌떼 모이는 중...</item>
+    </string-array>
+</resources>
