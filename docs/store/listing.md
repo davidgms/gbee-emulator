@@ -14,7 +14,7 @@ GBee - GBA Emulator
 Play your GBA games your way: custom buttons, themes, save states, achievements.
 ```
 
-## Full description (2249/4000)
+## Full description (2368/4000)
 
 ```
 GBee is a GBA emulator made for phones, hosted by GB, a bee in shades. Add a folder with your own games and start playing.
@@ -60,13 +60,14 @@ GBee is a GBA emulator made for phones, hosted by GB, a bee in shades. Add a fol
 📚 YOUR LIBRARY
 • Search, favourites and sorting
 • ZIP files work, no need to unzip
+• Finds a game stored twice and asks which file to keep
 • Optional cover art, downloaded only if you turn it on
 
 NO GAMES INCLUDED
 GBee plays the games you legally own, from your own storage.
 
 PRIVACY
-GBee collects no data. It has no ads, no accounts of its own and no analytics. It goes online only for RetroAchievements after you sign in, and for cover art if you turn it on.
+GBee has no ads, no analytics and no accounts of its own, and the developer receives no data. It goes online only for RetroAchievements after you sign in, which receives your username and game progress, and for cover art if you turn it on.
 
 The screenshots show Butano Fighter, a free homebrew game by GValiente, with art by Pixel-boy (Sparklin Labs, CC0).
 
