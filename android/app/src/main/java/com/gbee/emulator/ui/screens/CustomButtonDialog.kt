@@ -1,5 +1,8 @@
 package com.gbee.emulator.ui.screens
 
+import com.gbee.emulator.R
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,34 +26,41 @@ import com.gbee.emulator.engine.GbaEngine
 import com.gbee.emulator.ui.theme.*
 import java.util.UUID
 
-/** name, GBA key, in the order the picker shows them. */
+/** name (string resource), GBA key, in the order the picker shows them. */
 private val PICKABLE_KEYS = listOf(
-    "Up" to GbaEngine.KEY_UP,
-    "Down" to GbaEngine.KEY_DOWN,
-    "Left" to GbaEngine.KEY_LEFT,
-    "Right" to GbaEngine.KEY_RIGHT,
-    "L" to GbaEngine.KEY_L,
-    "R" to GbaEngine.KEY_R,
-    "A" to GbaEngine.KEY_A,
-    "B" to GbaEngine.KEY_B,
-    "Start" to GbaEngine.KEY_START,
-    "Select" to GbaEngine.KEY_SELECT,
+    R.string.key_up to GbaEngine.KEY_UP,
+    R.string.key_down to GbaEngine.KEY_DOWN,
+    R.string.key_left to GbaEngine.KEY_LEFT,
+    R.string.key_right to GbaEngine.KEY_RIGHT,
+    R.string.button_l to GbaEngine.KEY_L,
+    R.string.button_r to GbaEngine.KEY_R,
+    R.string.button_a to GbaEngine.KEY_A,
+    R.string.button_b to GbaEngine.KEY_B,
+    R.string.button_start to GbaEngine.KEY_START,
+    R.string.button_select to GbaEngine.KEY_SELECT,
 )
 
-private fun keyLabel(key: Int): String = PICKABLE_KEYS.firstOrNull { it.second == key }?.first ?: "?"
+/** Resolves the key names once, so a `joinToString` lambda does not need to be composable. */
+@Composable
+private fun keyLabels(): (Int) -> String {
+    val names = PICKABLE_KEYS.associate { (name, key) -> key to stringResource(name) }
+    return { key -> names[key] ?: "?" }
+}
 
-private val CustomButtonMode.label: String
+@get:StringRes
+private val CustomButtonMode.label: Int
     get() = when (this) {
-        CustomButtonMode.COMBO -> "Combo"
-        CustomButtonMode.SEQUENCE -> "Sequence"
-        CustomButtonMode.TOGGLE_HOLD -> "Toggle hold"
+        CustomButtonMode.COMBO -> R.string.mode_combo
+        CustomButtonMode.SEQUENCE -> R.string.mode_sequence
+        CustomButtonMode.TOGGLE_HOLD -> R.string.mode_toggle_hold
     }
 
-private val CustomButtonMode.description: String
+@get:StringRes
+private val CustomButtonMode.description: Int
     get() = when (this) {
-        CustomButtonMode.COMBO -> "Presses every picked key together, held while you hold this one"
-        CustomButtonMode.SEQUENCE -> "Taps each picked key in order, once each - pick the same key twice for a double press"
-        CustomButtonMode.TOGGLE_HOLD -> "Tap to start holding every picked key; tap again to let go"
+        CustomButtonMode.COMBO -> R.string.mode_combo_description
+        CustomButtonMode.SEQUENCE -> R.string.mode_sequence_description
+        CustomButtonMode.TOGGLE_HOLD -> R.string.mode_toggle_hold_description
     }
 
 /**
@@ -65,6 +75,7 @@ fun CustomButtonsListDialog(
     onDelete: (CustomButton) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val keyLabel = keyLabels()
     var editing by remember { mutableStateOf<CustomButton?>(null) }
     var creating by remember { mutableStateOf(false) }
 
@@ -73,12 +84,12 @@ fun CustomButtonsListDialog(
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text("Custom Buttons", fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.custom_buttons_title), fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 if (buttons.isEmpty()) {
                     Text(
-                        "No custom buttons yet in this layout.",
+                        stringResource(R.string.custom_buttons_empty),
                         color = PineGlowMist.copy(alpha = 0.7f),
                         fontSize = 13.sp,
                     )
@@ -88,26 +99,30 @@ fun CustomButtonsListDialog(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(button.name, color = PineGlowMist, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                "${button.mode.label} · ${button.keys.joinToString(" ") { keyLabel(it) }}",
+                                stringResource(
+                                    R.string.custom_button_summary,
+                                    stringResource(button.mode.label),
+                                    button.keys.joinToString(" ") { keyLabel(it) },
+                                ),
                                 color = AmberResin,
                                 fontSize = 11.sp,
                             )
                         }
                         IconButton(onClick = { editing = button }) {
-                            Icon(Icons.Default.Edit, "Edit", tint = AmberResin)
+                            Icon(Icons.Default.Edit, stringResource(R.string.edit), tint = AmberResin)
                         }
                         IconButton(onClick = { onDelete(button) }) {
-                            Icon(Icons.Default.Delete, "Delete", tint = AmberResin)
+                            Icon(Icons.Default.Delete, stringResource(R.string.delete), tint = AmberResin)
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { creating = true }) { Text("+ New Button", color = GoldenSaplight) }
+            TextButton(onClick = { creating = true }) { Text(stringResource(R.string.custom_button_new), color = GoldenSaplight) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.close), color = PineGlowMist) }
         },
     )
 
@@ -138,6 +153,7 @@ private fun CustomButtonEditDialog(
     onSave: (CustomButton) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val keyLabel = keyLabels()
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var mode by remember { mutableStateOf(existing?.mode ?: CustomButtonMode.COMBO) }
     var keys by remember { mutableStateOf(existing?.keys ?: emptyList()) }
@@ -158,7 +174,7 @@ private fun CustomButtonEditDialog(
         containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
-        title = { Text(if (existing == null) "New custom button" else "Edit custom button") },
+        title = { Text(stringResource(if (existing == null) R.string.custom_button_new_title else R.string.custom_button_edit_title)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -168,7 +184,7 @@ private fun CustomButtonEditDialog(
                     value = name,
                     onValueChange = { name = it },
                     singleLine = true,
-                    label = { Text("Name") },
+                    label = { Text(stringResource(R.string.custom_button_name)) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = PineGlowMist,
                         unfocusedTextColor = PineGlowMist,
@@ -179,7 +195,7 @@ private fun CustomButtonEditDialog(
                 )
 
                 Column {
-                    Text("Behaviour", color = AmberResin, fontSize = 12.sp)
+                    Text(stringResource(R.string.custom_button_behaviour), color = AmberResin, fontSize = 12.sp)
                     CustomButtonMode.entries.forEach { m ->
                         // The row and the radio are two separate touch targets
                         // for the same choice, so they share one handler. They
@@ -217,8 +233,8 @@ private fun CustomButtonEditDialog(
                                 ),
                             )
                             Column {
-                                Text(m.label, color = PineGlowMist, fontSize = 13.sp)
-                                Text(m.description, color = PineGlowMist.copy(alpha = 0.6f), fontSize = 10.sp)
+                                Text(stringResource(m.label), color = PineGlowMist, fontSize = 13.sp)
+                                Text(stringResource(m.description), color = PineGlowMist.copy(alpha = 0.6f), fontSize = 10.sp)
                             }
                         }
                     }
@@ -226,7 +242,7 @@ private fun CustomButtonEditDialog(
 
                 Column {
                     Text(
-                        if (mode == CustomButtonMode.SEQUENCE) "Tap keys in order" else "Keys",
+                        stringResource(if (mode == CustomButtonMode.SEQUENCE) R.string.keys_in_order else R.string.keys),
                         color = AmberResin,
                         fontSize = 12.sp,
                     )
@@ -240,16 +256,20 @@ private fun CustomButtonEditDialog(
 
                 if (mode == CustomButtonMode.SEQUENCE) {
                     Text(
-                        text = if (keys.isEmpty()) "Sequence: (empty)" else "Sequence: ${keys.joinToString(" → ") { keyLabel(it) }}",
+                        text = if (keys.isEmpty()) {
+                            stringResource(R.string.sequence_empty)
+                        } else {
+                            stringResource(R.string.sequence_keys, keys.joinToString(" → ") { keyLabel(it) })
+                        },
                         color = PineGlowMist,
                         fontSize = 12.sp,
                     )
                     Row {
                         TextButton(onClick = { keys = keys.dropLast(1) }, enabled = keys.isNotEmpty()) {
-                            Text("Undo last", color = AmberResin, fontSize = 12.sp)
+                            Text(stringResource(R.string.undo_last), color = AmberResin, fontSize = 12.sp)
                         }
                         TextButton(onClick = { keys = emptyList() }, enabled = keys.isNotEmpty()) {
-                            Text("Clear", color = AmberResin, fontSize = 12.sp)
+                            Text(stringResource(R.string.clear), color = AmberResin, fontSize = 12.sp)
                         }
                     }
                 }
@@ -268,10 +288,10 @@ private fun CustomButtonEditDialog(
                         )
                     )
                 },
-            ) { Text("Save", color = if (canSave) GoldenSaplight else PineGlowMist.copy(alpha = 0.4f)) }
+            ) { Text(stringResource(R.string.save), color = if (canSave) GoldenSaplight else PineGlowMist.copy(alpha = 0.4f)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = PineGlowMist) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = PineGlowMist) }
         },
     )
 }
@@ -298,7 +318,7 @@ private fun KeyPickerGrid(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            label,
+                            stringResource(label),
                             color = if (isSelected) BurntRoot else PineGlowMist,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,

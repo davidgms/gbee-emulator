@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>Cargando...</item>
+        <item>Zumbando...</item>
+        <item>Jugando...</item>
+        <item>Avanzando...</item>
+        <item>Haciendo miel...</item>
+        <item>Polinizando...</item>
+        <item>Enjambrando...</item>
+        <item>Aleteando...</item>
+        <item>Arrancando...</item>
+        <item>Parpadeando...</item>
+        <item>Pixelando...</item>
+        <item>Volando...</item>
+    </string-array>
+</resources>

@@ -134,11 +134,12 @@ object RaEngine {
      */
     val trackers: StateFlow<Map<Int, String>> = _trackers.asStateFlow()
 
-    private val _leaderboardNotice = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    private val _leaderboardNotice = MutableSharedFlow<LeaderboardNotice>(extraBufferCapacity = 4)
     /** "Attempt started", "score submitted" - worth a word, not a screen. */
     val leaderboardNotice = _leaderboardNotice.asSharedFlow()
 
-    private val _loginError = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** The server's own message, or null when it sent none and the UI says it. */
+    private val _loginError = MutableSharedFlow<String?>(extraBufferCapacity = 4)
     val loginError = _loginError.asSharedFlow()
 
     /** False when the native library is missing, so callers degrade quietly. */
@@ -383,9 +384,9 @@ object RaEngine {
             EVENT_LEADERBOARD_TRACKER_HIDE ->
                 _trackers.update { it - id }
             EVENT_LEADERBOARD_STARTED ->
-                _leaderboardNotice.tryEmit("Leaderboard attempt started: ${title.orEmpty()}")
+                _leaderboardNotice.tryEmit(LeaderboardNotice(submitted = false, title.orEmpty()))
             EVENT_LEADERBOARD_SUBMITTED ->
-                _leaderboardNotice.tryEmit("Leaderboard score submitted: ${title.orEmpty()}")
+                _leaderboardNotice.tryEmit(LeaderboardNotice(submitted = true, title.orEmpty()))
             // Deliberately quiet: a failed attempt is the normal end of most
             // runs, and saying so every time would be nagging.
             EVENT_LEADERBOARD_FAILED -> Log.i(TAG, "leaderboard attempt failed")
@@ -410,7 +411,7 @@ object RaEngine {
             // on every launch.
             store?.clear()
             _user.value = null
-            _loginError.tryEmit(errorMessage?.takeIf { it.isNotBlank() } ?: "Sign-in failed")
+            _loginError.tryEmit(errorMessage?.takeIf { it.isNotBlank() })
         }
     }
 
@@ -493,6 +494,9 @@ object RaEngine {
 
 /** The game a session is tracking. */
 data class RaGame(val title: String, val achievementCount: Int)
+
+/** A leaderboard event worth a word: an attempt started, or its score submitted. */
+data class LeaderboardNotice(val submitted: Boolean, val title: String)
 
 /** An achievement earned while playing. */
 data class RaUnlock(val id: Int, val title: String, val description: String, val points: Int)

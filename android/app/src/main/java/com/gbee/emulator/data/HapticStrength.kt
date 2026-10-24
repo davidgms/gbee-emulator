@@ -1,5 +1,8 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.StringRes
+import com.gbee.emulator.R
+
 /**
  * How hard the phone answers a press of an on-screen button.
  *
@@ -11,9 +14,9 @@ package com.gbee.emulator.data
  * times a second has to be quieter than a notification. `VibrationEffect`
  * takes 1-255; the top step here is deliberately well under full power.
  */
-enum class HapticStrength(val label: String, val amplitude: Int, val millis: Long) {
-    OFF("Off", 0, 0),
-    LIGHT("Light", 40, 8),
-    MEDIUM("Medium", 90, 12),
-    STRONG("Strong", 160, 16),
+enum class HapticStrength(@StringRes val label: Int, val amplitude: Int, val millis: Long) {
+    OFF(R.string.haptic_off, 0, 0),
+    LIGHT(R.string.haptic_light, 40, 8),
+    MEDIUM(R.string.haptic_medium, 90, 12),
+    STRONG(R.string.haptic_strong, 160, 16),
 }

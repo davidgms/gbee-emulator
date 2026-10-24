@@ -1,5 +1,8 @@
 package com.gbee.emulator.data
 
+import androidx.annotation.StringRes
+import com.gbee.emulator.R
+
 import androidx.compose.ui.graphics.Color
 import com.gbee.emulator.ui.theme.AmberResin
 import com.gbee.emulator.ui.theme.BurntRoot
@@ -35,11 +38,11 @@ data class ControlPalette(
 )
 
 /** A named control colour scheme, as offered in Settings. */
-enum class ControlTint(val label: String) {
-    NIGHT("Night"),
-    HONEY("Honey"),
-    VIOLET("Violet"),
-    CLASSIC("Classic grey");
+enum class ControlTint(@StringRes val label: Int) {
+    NIGHT(R.string.tint_night),
+    HONEY(R.string.tint_honey),
+    VIOLET(R.string.tint_violet),
+    CLASSIC(R.string.tint_classic);
 
     val palette: ControlPalette
         get() = when (this) {

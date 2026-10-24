@@ -1,5 +1,6 @@
 package com.gbee.emulator.data
 
+import com.gbee.emulator.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -15,36 +16,36 @@ class RelativeTimeTest {
 
     @Test
     fun `under a minute is just now`() {
-        assertEquals("just now", ago(0))
-        assertEquals("just now", ago(59_000))
+        assertEquals(RelativeTime.Age.JUST_NOW, ago(0))
+        assertEquals(RelativeTime.Age.JUST_NOW, ago(59_000))
     }
 
     @Test
     fun `minutes hours and days`() {
-        assertEquals("1 minute ago", ago(minute))
-        assertEquals("45 minutes ago", ago(45 * minute))
-        assertEquals("1 hour ago", ago(hour))
-        assertEquals("23 hours ago", ago(23 * hour))
-        assertEquals("1 day ago", ago(day))
-        assertEquals("6 days ago", ago(6 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_minutes, 1), ago(minute))
+        assertEquals(RelativeTime.Age(R.plurals.ago_minutes, 45), ago(45 * minute))
+        assertEquals(RelativeTime.Age(R.plurals.ago_hours, 1), ago(hour))
+        assertEquals(RelativeTime.Age(R.plurals.ago_hours, 23), ago(23 * hour))
+        assertEquals(RelativeTime.Age(R.plurals.ago_days, 1), ago(day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_days, 6), ago(6 * day))
     }
 
     @Test
     fun `a week in, it counts weeks`() {
-        assertEquals("1 week ago", ago(7 * day))
-        assertEquals("4 weeks ago", ago(29 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_weeks, 1), ago(7 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_weeks, 4), ago(29 * day))
     }
 
     @Test
     fun `a month in, it counts months`() {
-        assertEquals("1 month ago", ago(30 * day))
-        assertEquals("11 months ago", ago(364 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_months, 1), ago(30 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_months, 11), ago(364 * day))
     }
 
     @Test
     fun `a year in, it counts years`() {
-        assertEquals("1 year ago", ago(365 * day))
-        assertEquals("2 years ago", ago(800 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_years, 1), ago(365 * day))
+        assertEquals(RelativeTime.Age(R.plurals.ago_years, 2), ago(800 * day))
     }
 
     /**
@@ -53,6 +54,6 @@ class RelativeTimeTest {
      */
     @Test
     fun `a timestamp in the future reads as just now`() {
-        assertEquals("just now", RelativeTime.ago(now + day, now))
+        assertEquals(RelativeTime.Age.JUST_NOW, RelativeTime.ago(now + day, now))
     }
 }

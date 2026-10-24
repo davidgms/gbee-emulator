@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>載入中...</item>
+        <item>嗡嗡中...</item>
+        <item>遊戲中...</item>
+        <item>前進中...</item>
+        <item>釀蜜中...</item>
+        <item>授粉中...</item>
+        <item>築巢中...</item>
+        <item>振翅中...</item>
+        <item>開機中...</item>
+        <item>眨眼中...</item>
+        <item>像素化中...</item>
+        <item>蜂群集結中...</item>
+    </string-array>
+</resources>

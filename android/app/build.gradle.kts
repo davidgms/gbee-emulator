@@ -7,6 +7,12 @@ plugins {
 android {
     namespace = "com.gbee.emulator"
 
+    // Lists the values-xx folders in the manifest, so Android 13+ offers the
+    // app's own language picker in system settings (App info > Language).
+    androidResources {
+        generateLocaleConfig = true
+    }
+
     // android.util.Log returns defaults instead of throwing in JVM tests, so
     // RaEngine can run off-device.
     testOptions { unitTests.isReturnDefaultValues = true }

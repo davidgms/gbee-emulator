@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>Memuat...</item>
+        <item>Mendengung...</item>
+        <item>Main game...</item>
+        <item>Melaju...</item>
+        <item>Bikin madu...</item>
+        <item>Menyerbuk...</item>
+        <item>Masuk sarang...</item>
+        <item>Mengepak sayap...</item>
+        <item>Menyalakan...</item>
+        <item>Berkedip...</item>
+        <item>Memiksel...</item>
+        <item>Berkerumun...</item>
+    </string-array>
+</resources>

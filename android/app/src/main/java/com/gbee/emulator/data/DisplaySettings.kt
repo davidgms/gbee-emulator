@@ -280,7 +280,7 @@ class DisplaySettings(context: Context) {
      *
      * Off by default: a player who opens a game expecting the title screen and
      * lands mid-battle has lost their bearings, and the one who wants this
-     * knows they want it. The quick save is slot 0 - see `slotName`.
+     * knows they want it. The quick save is slot 0 - see `slotMessage`.
      */
     fun getAutoLoadQuickSave(): Boolean = prefs.getBoolean(KEY_AUTO_LOAD, false)
 

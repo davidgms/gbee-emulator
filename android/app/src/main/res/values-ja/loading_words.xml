@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loading_words">
+        <item>ロード中...</item>
+        <item>ブンブン中...</item>
+        <item>ゲーム中...</item>
+        <item>アドバンス中...</item>
+        <item>ハチミツ中...</item>
+        <item>受粉中...</item>
+        <item>巣づくり中...</item>
+        <item>パタパタ中...</item>
+        <item>起動中...</item>
+        <item>ピカピカ中...</item>
+        <item>ドット化中...</item>
+        <item>群れ中...</item>
+    </string-array>
+</resources>

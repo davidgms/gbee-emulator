@@ -27,6 +27,4 @@ object RateTip {
 
     /** Once per app run, so the tip informs without nagging. */
     @Volatile var shownThisRun = false
-
-    const val MESSAGE = "Your phone lowered the screen to %d Hz. Press Home and come back for smooth 60 Hz."
 }

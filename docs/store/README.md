@@ -6,6 +6,7 @@
 | `feature-graphic.png` | Feature graphic | 1024x500, RGB, no alpha |
 | `screenshots/*.png` | Phone screenshots | 1080x1920, RGB |
 | `listing.md` | App name, short and full description | - |
+| `listing-<locale>.md` | The same text in pt-BR, es-419, es-ES, id, ja-JP, fr-FR, de-DE, tr-TR, zh-TW and ko-KR, machine-translated and not yet reviewed by native speakers | - |
 
 `icon-512.png` and `feature-graphic.png` are drawn by `make.py` from the
 launcher foreground (`android/app/src/main/res/drawable-nodpi/ic_launcher_foreground.png`),
