@@ -102,6 +102,7 @@ import com.gbee.emulator.data.ScreenFilter
 import com.gbee.emulator.data.StateSlot
 import com.gbee.emulator.data.ScaleMode
 import com.gbee.emulator.engine.GbaEngine
+import com.gbee.emulator.ui.StateToast
 import com.gbee.emulator.ui.theme.*
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -883,21 +884,24 @@ fun EmulationScreen(
         if (showLeaveEditConfirm) {
             AlertDialog(
                 onDismissRequest = { showLeaveEditConfirm = false },
-                title = { Text("Unsaved layout changes") },
-                text = { Text("Save the changes to this layout before leaving?") },
+                containerColor = NightPanel,
+                titleContentColor = GoldenSaplight,
+                textContentColor = PineGlowMist,
+                title = { Text("Unsaved layout changes", fontWeight = FontWeight.Bold) },
+                text = { Text("Save the changes to this layout before leaving?", fontSize = 13.sp) },
                 confirmButton = {
                     TextButton(onClick = {
                         showLeaveEditConfirm = false
                         saveLayoutEdits()
                         onBack()
-                    }) { Text("Save") }
+                    }) { Text("Save", color = GoldenSaplight) }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         showLeaveEditConfirm = false
                         discardLayoutEdits()
                         onBack()
-                    }) { Text("Don't save") }
+                    }) { Text("Don't save", color = PineGlowMist) }
                 },
             )
         }
@@ -2284,56 +2288,6 @@ private fun AchievementsDialog(
             TextButton(onClick = onDismiss) { Text("Close", color = GoldenSaplight) }
         },
     )
-}
-
-@Composable
-private fun StateToast(
-    message: String?,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-    durationMs: Long = 2200,
-    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Default.CheckCircle,
-) {
-    // Held locally so the pill can finish fading out after the message is
-    // already gone from the ViewModel.
-    var shown by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(message) {
-        if (message != null) {
-            shown = message
-            delay(durationMs)
-            onDismiss()
-        }
-    }
-
-    AnimatedVisibility(
-        visible = message != null,
-        enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { -it / 2 },
-        exit = fadeOut(tween(220)),
-        modifier = modifier.padding(top = 56.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(NightPanel)
-                .border(1.dp, GoldenSaplight.copy(alpha = 0.45f), RoundedCornerShape(50))
-                .padding(horizontal = 16.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = GoldenSaplight,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = shown.orEmpty(),
-                color = PineGlowMist,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-    }
 }
 
 /**

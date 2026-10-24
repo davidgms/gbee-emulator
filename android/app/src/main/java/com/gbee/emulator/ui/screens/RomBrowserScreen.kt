@@ -5,6 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import java.io.File
 import com.gbee.emulator.data.RomHeader
@@ -48,6 +54,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import com.gbee.emulator.data.RomArtwork
 import com.gbee.emulator.data.CoverArt
 import com.gbee.emulator.data.DisplaySettings
+import com.gbee.emulator.data.DuplicateChoices
+import com.gbee.emulator.data.duplicateGroups
+import com.gbee.emulator.data.withoutHidden
 import com.gbee.emulator.data.Favorites
 import com.gbee.emulator.data.LastPlayed
 import com.gbee.emulator.data.RelativeTime
@@ -55,7 +64,7 @@ import com.gbee.emulator.data.RomBytes
 import com.gbee.emulator.data.RomEntry
 import com.gbee.emulator.data.RomFiles
 import com.gbee.emulator.data.RomFolderManager
-import android.widget.Toast
+import com.gbee.emulator.ui.AppToast
 import com.gbee.emulator.data.RomPlaceholder
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
@@ -92,10 +101,12 @@ enum class RomSortOrder(val label: String) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RomBrowserScreen(
-    roms: List<RomEntry>,
+    scanned: List<RomEntry>,
     onRomClick: (RomEntry) -> Unit,
     onSettingsClick: () -> Unit,
     onRefresh: () -> Unit = {},
+    /** A rescan the player asked for; calls back on the main thread when it ends. */
+    onReload: (onDone: () -> Unit) -> Unit = { it() },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -106,6 +117,12 @@ fun RomBrowserScreen(
     val displaySettings = remember { DisplaySettings(context) }
     var downloadCovers by remember { mutableStateOf(displaySettings.getDownloadCoverArt()) }
     var askCovers by remember { mutableStateOf(false) }
+    // Copies hidden since the last scan; the next scan leaves them out itself.
+    val duplicateChoices = remember { DuplicateChoices(context) }
+    var hiddenNow by remember(scanned) { mutableStateOf(emptySet<String>()) }
+    var answers by remember { mutableIntStateOf(0) }
+    val roms = remember(scanned, hiddenNow) { withoutHidden(scanned, hiddenNow) }
+    val duplicates = remember(roms, answers) { duplicateGroups(roms, duplicateChoices.settled()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -137,11 +154,32 @@ fun RomBrowserScreen(
     var confirmDeleteSaves by remember { mutableStateOf<RomEntry?>(null) }
     var confirmDeleteRom by remember { mutableStateOf<RomEntry?>(null) }
     var favoritesOnly by remember { mutableStateOf(false) }
-    // The scan is a coroutine on an IO dispatcher and gives no completion
-    // signal back, so the spinner is held for a beat rather than until the
-    // list changes: a rescan that finds nothing new changes nothing, and a
-    // spinner waiting for that would never stop.
     val refreshState = rememberPullToRefreshState()
+    // The reload button and the pull share one rescan, with a toast at each
+    // end so a scan that finds nothing new still reads as done.
+    var reloading by remember { mutableStateOf(false) }
+    fun reload(onDone: () -> Unit = {}) {
+        if (reloading) return
+        reloading = true
+        AppToast.show("Reloading games...")
+        val start = System.currentTimeMillis()
+        onReload {
+            // A small library scans in a few milliseconds; hold the spin and
+            // the first toast long enough to be seen before the second.
+            scope.launch {
+                kotlinx.coroutines.delay(1_200 - (System.currentTimeMillis() - start))
+                reloading = false
+                onDone()
+                AppToast.show("Games list updated")
+            }
+        }
+    }
+    val spin by rememberInfiniteTransition(label = "reload").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
+        label = "reload",
+    )
     var sortOrder by remember { mutableStateOf(RomSortOrder.LAST_PLAYED_DESC) }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
@@ -181,6 +219,13 @@ fun RomBrowserScreen(
                 }
             },
         )
+    }
+    duplicates.firstOrNull()?.takeIf { !askCovers }?.let { group ->
+        DuplicateDialog(group) { keep ->
+            duplicateChoices.resolve(group, keep)
+            if (keep != null) hiddenNow = hiddenNow + (group.map { it.filePath } - keep.filePath)
+            answers++
+        }
     }
     Scaffold(
         topBar = {
@@ -262,11 +307,12 @@ fun RomBrowserScreen(
                             }
                         }
                     }
-                    IconButton(onClick = onRefresh) {
+                    IconButton(onClick = { reload() }) {
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "Rescan ROM folders",
-                            tint = AmberResin
+                            tint = AmberResin,
+                            modifier = Modifier.rotate(if (reloading) spin else 0f),
                         )
                     }
                     IconButton(onClick = onSettingsClick) {
@@ -400,9 +446,7 @@ fun RomBrowserScreen(
 
     if (refreshState.isRefreshing) {
         LaunchedEffect(Unit) {
-            onRefresh()
-            kotlinx.coroutines.delay(600)
-            refreshState.endRefresh()
+            reload { refreshState.endRefresh() }
         }
     }
 
@@ -480,7 +524,7 @@ fun RomBrowserScreen(
                     // A provider that will not delete is its own error; a
                     // path that fails stays as silent as it always was.
                     if (!deleted && !RomBytes.isPath(rom.filePath)) {
-                        Toast.makeText(context, "Could not delete ${rom.fileName}", Toast.LENGTH_LONG).show()
+                        AppToast.show("Could not delete ${rom.fileName}")
                     }
                     onRefresh()
                 }
@@ -560,6 +604,49 @@ private fun SheetItem(
         Spacer(modifier = Modifier.width(20.dp))
         Text(label, color = PineGlowMist, fontSize = 15.sp)
     }
+}
+
+/**
+ * "Which copy do you keep?" for one game found as several files. No way out
+ * but an answer: the answer is what stops the question coming back.
+ */
+@Composable
+private fun DuplicateDialog(group: List<RomEntry>, onKeep: (RomEntry?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        containerColor = NightPanel,
+        titleContentColor = GoldenSaplight,
+        textContentColor = PineGlowMist,
+        title = { Text("Same game found twice", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${group.first().name} is in your folders more than once. " +
+                        "Pick the file to keep. GBee hides the other and does not ask again.",
+                    fontSize = 13.sp,
+                )
+                for (rom in group) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onKeep(rom) }
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(12.dp),
+                    ) {
+                        Text(rom.fileName, color = GoldenSaplight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${rom.folderLabel ?: File(rom.filePath).parent.orEmpty()} - ${rom.size}",
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onKeep(null) }) { Text("Keep both", color = PineGlowMist) }
+        },
+    )
 }
 
 /** One prompt shape for both deletions, so they cannot drift apart. */
@@ -811,7 +898,7 @@ fun RomInfoDialog(rom: RomEntry, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = NightRaised,
+        containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
         title = { Text("Game info", fontWeight = FontWeight.Bold) },

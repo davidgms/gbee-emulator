@@ -13,6 +13,15 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import androidx.compose.runtime.CompositionLocalProvider
 import com.gbee.emulator.ui.Haptics
+import com.gbee.emulator.ui.AppToast
+import com.gbee.emulator.ui.StateToast
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.gbee.emulator.ui.theme.LocalControlFontScale
 import com.gbee.emulator.ui.theme.LocalControlPalette
 import com.gbee.emulator.ui.theme.LocalDpadCardinalHalf
@@ -53,7 +62,7 @@ fun GBeeNavHost() {
     val scope = rememberCoroutineScope()
 
     var romList by remember { mutableStateOf<List<RomEntry>>(emptyList()) }
-    fun rescanRoms() {
+    fun rescanRoms(onDone: () -> Unit = {}) {
         // Tree folders carry their own grant. A path folder left from before
         // SAF cannot be read any more and shows as "Needs re-pick" in Settings.
         scope.launch(Dispatchers.IO) {
@@ -61,6 +70,7 @@ fun GBeeNavHost() {
             // there too, on the list it just published: battery saves are
             // moving into app storage while the app can still read the folders.
             folderManager.scanAndImport(publish = { romList = it })
+            withContext(Dispatchers.Main) { onDone() }
         }
     }
 
@@ -77,6 +87,8 @@ fun GBeeNavHost() {
         loaded = true
     }
 
+    val appToast by AppToast.message.collectAsState()
+    Box(Modifier.fillMaxSize()) {
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash") {
             SplashScreen(
@@ -92,7 +104,7 @@ fun GBeeNavHost() {
 
         composable("rom_browser") {
             RomBrowserScreen(
-                roms = romList,
+                scanned = romList,
                 onRomClick = { rom ->
                     navController.navigate("emulation/${RomBytes.encodeId(rom.filePath)}")
                 },
@@ -100,6 +112,7 @@ fun GBeeNavHost() {
                     navController.navigate("settings")
                 },
                 onRefresh = { rescanRoms() },
+                onReload = { done -> rescanRoms(done) },
             )
         }
 
@@ -239,5 +252,16 @@ fun GBeeNavHost() {
                 workScope = scope,
             )
         }
+    }
+    // Above every screen, at the bottom where a toast is looked for.
+    StateToast(
+        message = appToast,
+        onDismiss = AppToast::clear,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
+        durationMs = 3_000,
+    )
     }
 }
