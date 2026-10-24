@@ -13,6 +13,15 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import androidx.compose.runtime.CompositionLocalProvider
 import com.gbee.emulator.ui.Haptics
+import com.gbee.emulator.ui.AppToast
+import com.gbee.emulator.ui.StateToast
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.gbee.emulator.ui.theme.LocalControlFontScale
 import com.gbee.emulator.ui.theme.LocalControlPalette
 import com.gbee.emulator.ui.theme.LocalDpadCardinalHalf
@@ -78,6 +87,8 @@ fun GBeeNavHost() {
         loaded = true
     }
 
+    val appToast by AppToast.message.collectAsState()
+    Box(Modifier.fillMaxSize()) {
     NavHost(navController = navController, startDestination = "splash") {
         composable("splash") {
             SplashScreen(
@@ -241,5 +252,16 @@ fun GBeeNavHost() {
                 workScope = scope,
             )
         }
+    }
+    // Above every screen, at the bottom where a toast is looked for.
+    StateToast(
+        message = appToast,
+        onDismiss = AppToast::clear,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
+        durationMs = 3_000,
+    )
     }
 }

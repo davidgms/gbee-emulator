@@ -64,7 +64,7 @@ import com.gbee.emulator.data.RomBytes
 import com.gbee.emulator.data.RomEntry
 import com.gbee.emulator.data.RomFiles
 import com.gbee.emulator.data.RomFolderManager
-import android.widget.Toast
+import com.gbee.emulator.ui.AppToast
 import com.gbee.emulator.data.RomPlaceholder
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
@@ -161,11 +161,17 @@ fun RomBrowserScreen(
     fun reload(onDone: () -> Unit = {}) {
         if (reloading) return
         reloading = true
-        Toast.makeText(context, "Reloading games...", Toast.LENGTH_SHORT).show()
+        AppToast.show("Reloading games...")
+        val start = System.currentTimeMillis()
         onReload {
-            reloading = false
-            onDone()
-            Toast.makeText(context, "Games list updated", Toast.LENGTH_SHORT).show()
+            // A small library scans in a few milliseconds; hold the spin and
+            // the first toast long enough to be seen before the second.
+            scope.launch {
+                kotlinx.coroutines.delay(1_200 - (System.currentTimeMillis() - start))
+                reloading = false
+                onDone()
+                AppToast.show("Games list updated")
+            }
         }
     }
     val spin by rememberInfiniteTransition(label = "reload").animateFloat(
@@ -518,7 +524,7 @@ fun RomBrowserScreen(
                     // A provider that will not delete is its own error; a
                     // path that fails stays as silent as it always was.
                     if (!deleted && !RomBytes.isPath(rom.filePath)) {
-                        Toast.makeText(context, "Could not delete ${rom.fileName}", Toast.LENGTH_LONG).show()
+                        AppToast.show("Could not delete ${rom.fileName}")
                     }
                     onRefresh()
                 }
@@ -892,7 +898,7 @@ fun RomInfoDialog(rom: RomEntry, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = NightRaised,
+        containerColor = NightPanel,
         titleContentColor = GoldenSaplight,
         textContentColor = PineGlowMist,
         title = { Text("Game info", fontWeight = FontWeight.Bold) },

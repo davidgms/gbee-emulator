@@ -3,7 +3,7 @@ package com.gbee.emulator.ui.screens
 import android.net.Uri
 import android.os.Environment
 
-import android.widget.Toast
+import com.gbee.emulator.ui.AppToast
 import com.gbee.emulator.data.DuplicateChoices
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -377,7 +377,7 @@ fun SettingsScreen(
                         if (openGame == null) {
                             onBack()
                         } else {
-                            Toast.makeText(context, "The questions show on the game list", Toast.LENGTH_LONG).show()
+                            AppToast.show("The questions show on the game list")
                         }
                     },
                 )
@@ -900,7 +900,7 @@ fun SettingsScreen(
                     withContext(Dispatchers.Main) {
                         importBusy = false
                         importStatus = text
-                        Toast.makeText(context.applicationContext, text, Toast.LENGTH_LONG).show()
+                        AppToast.show(text)
                     }
                 }
             },
@@ -927,7 +927,7 @@ fun SettingsScreen(
                         withContext(Dispatchers.Main) {
                             exportBusy = false
                             exportStatus = text
-                            Toast.makeText(context.applicationContext, text, Toast.LENGTH_LONG).show()
+                            AppToast.show(text)
                         }
                     }
                 }
