@@ -121,8 +121,8 @@ const TIMER0_AT: usize = 8 + 152 + 24 + 1 + 68 + 115_200;
 const APU_LEN_AT: usize = 511_886;
 const SAMPLE_ACCUM_AT: usize = APU_LEN_AT + 4;
 /// Tail after `cycles`: chip state 18, DMA latches 16, SIO 4, ROM CRC 4,
-/// v11 live state 43.
-const LIVE_LEN: usize = 43;
+/// v11 live state 43, v12 GPIO/RTC block 20. `LIVE_LEN` covers the last two.
+const LIVE_LEN: usize = 43 + 20;
 const CYCLES_FROM_END: usize = 8 + 18 + 16 + 4 + 4 + LIVE_LEN;
 const CHIP_FROM_END: usize = 18 + 16 + 4 + 4 + LIVE_LEN;
 

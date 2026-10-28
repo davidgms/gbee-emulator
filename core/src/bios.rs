@@ -1,6 +1,8 @@
 // GBA BIOS HLE (High-Level Emulation)
 // Handles common SWI calls without requiring a real BIOS ROM.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::cpu::Cpu;
 use super::memory::MemoryBus;
 
@@ -19,18 +21,39 @@ pub fn handle_swi(swi_num: u32, cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
         0x0A => handle_arc_tan2(cpu),
         0x0B => handle_cpu_set(cpu, bus),
         0x0C => handle_cpu_fast_set(cpu, bus),
+        0x0D => handle_get_bios_checksum(cpu),
         0x0E => handle_bg_affine_set(cpu, bus),
         0x0F => handle_obj_affine_set(cpu, bus),
         0x10 => handle_bit_unpack(cpu, bus),
         0x11 => handle_lz77_uncomp_wram(cpu, bus),
         0x12 => handle_lz77_uncomp_vram(cpu, bus),
+        0x13 => handle_huff_uncomp(cpu, bus),
         0x14 => handle_rl_uncomp_wram(cpu, bus),
         0x15 => handle_rl_uncomp_vram(cpu, bus),
         0x16 => handle_diff8bit_unfilter_wram(cpu, bus),
         0x17 => handle_diff8bit_unfilter_vram(cpu, bus),
         0x18 => handle_diff16bit_unfilter(cpu, bus),
         0x19 => handle_sound_bias(cpu, bus),
-        _ => false,
+        0x1F => handle_midi_key2freq(cpu, bus),
+        _ => {
+            report_unhandled(swi_num);
+            false
+        }
+    }
+}
+
+/// One bit per SWI number already reported by [`report_unhandled`].
+static REPORTED: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+/// Warn about an SWI the HLE does not implement, once per number for the
+/// life of the process: a game calling it every frame must not flood the log.
+/// It used to return silently with r0-r3 unchanged, so a game depending on it
+/// failed somewhere else and the failure looked like a game bug.
+fn report_unhandled(swi_num: u32) {
+    let n = (swi_num & 0xFF) as usize;
+    let bit = 1u64 << (n % 64);
+    if REPORTED[n / 64].fetch_or(bit, Ordering::Relaxed) & bit == 0 {
+        log::warn!("unimplemented BIOS call: SWI 0x{n:02X}, returning with registers unchanged");
     }
 }
 
@@ -63,32 +86,62 @@ fn handle_soft_reset(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
     true
 }
 
+/// SWI 0x01. GBATEK, BIOS Reset Functions: bit 0 clears EWRAM, bit 1 IWRAM
+/// "excluding last 200h bytes" (the stack, the IRQ vector and the BIOS flags
+/// live there), bits 2-4 palette, VRAM and OAM, bit 5 resets the SIO
+/// registers, bit 6 the sound registers, bit 7 every other register. The
+/// screen is forced blank (DISPCNT = 0x0080) whatever r0 holds.
+///
+/// Registers go through the bus as a CPU store would, so the APU, DMA and
+/// timer queues see them. The register lists follow mGBA's `bios.c`.
 fn handle_register_ram_reset(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
     let flags = cpu.reg(0);
+    bus.write16(0x0400_0000, 0x0080);
     if flags & 0x01 != 0 {
-        for b in bus.ewram_data_mut().iter_mut() {
-            *b = 0;
-        }
+        bus.ewram_data_mut().fill(0);
     }
     if flags & 0x02 != 0 {
-        for b in bus.iwram_data_mut().iter_mut() {
-            *b = 0;
-        }
+        bus.iwram_data_mut()[..0x7E00].fill(0);
     }
     if flags & 0x04 != 0 {
-        for b in bus.palette_data_mut().iter_mut() {
-            *b = 0;
-        }
+        bus.palette_data_mut().fill(0);
     }
     if flags & 0x08 != 0 {
-        for b in bus.vram_data_mut().iter_mut() {
-            *b = 0;
-        }
+        bus.vram_data_mut().fill(0);
     }
     if flags & 0x10 != 0 {
-        for b in bus.oam_data_mut().iter_mut() {
-            *b = 0;
+        bus.oam_data_mut().fill(0);
+    }
+    let zero = |bus: &mut MemoryBus, from: u32, to: u32| {
+        for reg in (from..to).step_by(2) {
+            bus.write16(0x0400_0000 + reg, 0);
         }
+    };
+    if flags & 0x20 != 0 {
+        bus.write16(0x0400_0128, 0); // SIOCNT
+        bus.write16(0x0400_0134, 0x8000); // RCNT: general purpose
+        bus.write16(0x0400_012A, 0); // SIOMLT_SEND
+        bus.write16(0x0400_0140, 0); // JOYCNT
+        zero(bus, 0x150, 0x158); // JOY_RECV, JOY_TRANS
+    }
+    if flags & 0x40 != 0 {
+        // SOUNDCNT_X last, as the master enable; wave RAM too.
+        zero(bus, 0x60, 0x84);
+        zero(bus, 0x90, 0xA0);
+        bus.write16(0x0400_0084, 0);
+        bus.write16(0x0400_0088, 0x0200); // SOUNDBIAS
+    }
+    if flags & 0x80 != 0 {
+        zero(bus, 0x04, 0x56); // DISPSTAT to BLDY
+        for pa_pd in [0x20, 0x26, 0x30, 0x36] {
+            bus.write16(0x0400_0000 + pa_pd, 0x0100);
+        }
+        zero(bus, 0xB0, 0xE0); // DMA
+        zero(bus, 0x100, 0x110); // timers
+        bus.write16(0x0400_0200, 0); // IE
+        bus.write16(0x0400_0202, 0xFFFF); // IF, acknowledged
+        bus.write16(0x0400_0204, 0); // WAITCNT
+        bus.write16(0x0400_0208, 0); // IME
     }
     true
 }
@@ -455,21 +508,120 @@ fn handle_obj_affine_set(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
     true
 }
 
+/// SWI 0x0D. GBATEK: returns the BIOS checksum, 0xBAAE187F on a GBA. r1 and
+/// r3 are what the real routine's loop leaves (mGBA does the same).
+fn handle_get_bios_checksum(cpu: &mut Cpu) -> bool {
+    cpu.set_reg(0, 0xBAAE_187F);
+    cpu.set_reg(1, 1);
+    cpu.set_reg(3, 0x4000);
+    true
+}
+
+/// SWI 0x1F. GBATEK, MidiKey2Freq(r0 = WaveData, r1 = MIDI key, r2 = fine
+/// adjust 0-255): `[r0+4] / 2^((180 - key - fine/256) / 12)`. In single
+/// precision, as mGBA computes it; the BIOS's own table lookup is not
+/// reproduced, so the last digit may differ from hardware.
+fn handle_midi_key2freq(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
+    let rate = bus.read32(cpu.reg(0).wrapping_add(4));
+    let key = cpu.reg(1) as i32 as f32;
+    let fine = cpu.reg(2) as i32 as f32 / 256.0;
+    let freq = rate as f32 / ((180.0 - key - fine) / 12.0).exp2();
+    cpu.set_reg(0, freq as u32);
+    true
+}
+
+/// SWI 0x10. GBATEK, BitUnPack(r0 = source, r1 = dest, r2 = info): info is
+/// u16 source length in bytes, u8 source unit width (1, 2, 4, 8), u8 dest
+/// unit width (1, 2, 4, 8, 16, 32) and u32 offset in bits 0-30 with the
+/// zero-data flag in bit 31. Units are taken LSB first from each source byte;
+/// the offset is added to every non-zero unit (every unit with the flag), and
+/// the results are packed LSB first into words written to the destination.
+/// Not masked to the destination width: an overflowing unit ORs into the
+/// next, as in mGBA.
+///
+/// This was a stub that copied bytes until it read a zero.
 fn handle_bit_unpack(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
-    let src = cpu.reg(0);
-    let dst = cpu.reg(1);
-    let mut offset = 0u32;
-    loop {
-        let val = bus.read8(src.wrapping_add(offset));
-        if val == 0 {
-            break;
-        }
-        bus.write8(dst.wrapping_add(offset), val);
-        offset += 1;
-        if offset > 0x10000 {
-            break;
+    let (src, mut dst, info) = (cpu.reg(0), cpu.reg(1), cpu.reg(2));
+    let len = u32::from(bus.read16(info));
+    let src_width = u32::from(bus.read8(info.wrapping_add(2)));
+    let dst_width = u32::from(bus.read8(info.wrapping_add(3)));
+    let bias = bus.read32(info.wrapping_add(4));
+    if !matches!(src_width, 1 | 2 | 4 | 8) || !matches!(dst_width, 1 | 2 | 4 | 8 | 16 | 32) {
+        return true;
+    }
+    let (offset, zero_too) = (bias & 0x7FFF_FFFF, bias & 0x8000_0000 != 0);
+    let mask = (1u32 << src_width) - 1;
+    let (mut out, mut filled) = (0u32, 0u32);
+    for i in 0..len {
+        let byte = u32::from(bus.read8(src.wrapping_add(i)));
+        for shift in (0..8).step_by(src_width as usize) {
+            let mut unit = (byte >> shift) & mask;
+            if unit != 0 || zero_too {
+                unit = unit.wrapping_add(offset);
+            }
+            out |= unit.wrapping_shl(filled);
+            filled += dst_width;
+            if filled == 32 {
+                bus.write32(dst, out);
+                dst = dst.wrapping_add(4);
+                (out, filled) = (0, 0);
+            }
         }
     }
+    true
+}
+
+/// SWI 0x13. GBATEK, HuffUnComp(r0 = source, r1 = dest): a header (bits 0-3
+/// data size 4 or 8, bits 4-7 type 2, bits 8-31 decompressed size), a
+/// tree-size byte `n` with the tree in the `(n+1)*2` bytes from it, then the
+/// bit stream as 32-bit words read MSB first. A tree node holds the offset to
+/// its children in bits 0-5 - they sit at `(addr & !1) + offset*2 + 2` and
+/// one byte on - and bits 7 and 6 say child 0 or child 1 is a data leaf.
+/// Units are packed LSB first into words, as BitUnPack does.
+fn handle_huff_uncomp(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
+    let src = cpu.reg(0) & !3;
+    let dst = cpu.reg(1);
+    let header = bus.read32(src);
+    let bits = header & 0xF;
+    // 1 would need the tree to output single bits; mGBA declines it too.
+    if !matches!(bits, 2 | 4 | 8) {
+        return true;
+    }
+    let size = decompressed_size(header);
+    let root = src.wrapping_add(5);
+    let mut stream = src.wrapping_add(4 + (u32::from(bus.read8(src.wrapping_add(4))) + 1) * 2);
+    // A malformed tree that never reaches a leaf would read forever. A real
+    // one needs at most 255 bits per unit, so this bound never cuts one off.
+    let max_words = size * 8 + 1;
+    let mut out: Vec<u8> = Vec::with_capacity(size + 4);
+    let (mut word, mut filled) = (0u32, 0u32);
+    let (mut addr, mut node) = (root, bus.read8(root));
+    'words: for _ in 0..max_words {
+        let data = bus.read32(stream);
+        stream = stream.wrapping_add(4);
+        for bit in (0..32).rev() {
+            let one = (data >> bit) & 1 == 1;
+            let child = (addr & !1)
+                .wrapping_add(u32::from(node & 0x3F) * 2 + 2)
+                .wrapping_add(u32::from(one));
+            let leaf = node & if one { 0x40 } else { 0x80 } != 0;
+            if !leaf {
+                (addr, node) = (child, bus.read8(child));
+                continue;
+            }
+            word |= (u32::from(bus.read8(child)) & ((1 << bits) - 1)) << filled;
+            filled += bits;
+            (addr, node) = (root, bus.read8(root));
+            if filled == 32 {
+                out.extend_from_slice(&word.to_le_bytes());
+                (word, filled) = (0, 0);
+                if out.len() >= size {
+                    break 'words;
+                }
+            }
+        }
+    }
+    write_block(dst, &out, bus);
     true
 }
 

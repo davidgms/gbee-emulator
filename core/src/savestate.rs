@@ -27,7 +27,9 @@ const SAVE_MAGIC: &[u8; 4] = b"GBAS";
 /// the IRQ delay). Before it a restored machine kept its own values for
 /// these. Older states load with them derived from the registers or reset as
 /// at power-on.
-const SAVE_VERSION: u32 = 11;
+/// v12 appended the cartridge GPIO port and RTC registers (zeros on a cart
+/// without one). Older states load with the RTC as a set-up cart holds it.
+const SAVE_VERSION: u32 = 12;
 
 /// More cycles than any legitimate value of a counter owed to the next step
 /// or of the PPU's dot counter can reach (the longest DMA is ~2^21 cycles).
@@ -54,6 +56,10 @@ const ROM_ID_LEN: usize = 4;
 /// Bytes the v11 live state takes at the end of a state.
 #[cfg(test)]
 const LIVE_LEN: usize = 4 + 1 + 16 + 2 + 4 + 4 + 4 + 8;
+
+/// Bytes the v12 GPIO block takes at the end of a state.
+#[cfg(test)]
+const RTC_LEN: usize = crate::cart::GPIO_STATE_LEN;
 
 /// Save state snapshot of the entire GBA emulator.
 pub struct SaveState {
@@ -208,6 +214,9 @@ impl SaveState {
         write_u32(&mut buf, gba.cpu.entry_cycles);
         write_u32(&mut buf, gba.dma_stall);
         write_u64(&mut buf, gba.irq_since.unwrap_or(u64::MAX));
+
+        // v12: the GPIO port and the RTC's registers.
+        buf.extend_from_slice(&gba.bus.cart.gpio_state());
 
         SaveState { data: buf }
     }
@@ -425,11 +434,21 @@ impl SaveState {
 
         sync_dispstat_cache(gba);
         if version >= 11 {
-            restore_live(&mut cursor, gba)
+            restore_live(&mut cursor, gba)?;
         } else {
             derive_live(gba);
-            Ok(())
         }
+
+        let mut gpio = crate::cart::fresh_gpio_state();
+        if version >= 12 {
+            cursor.read_exact(&mut gpio)?;
+        }
+        gba.bus
+            .cart
+            .restore_gpio_state(&gpio)
+            .map_err(SaveStateError::Corrupt)?;
+        gba.bus.sync_gpio_window();
+        Ok(())
     }
 
     /// Save state to a file.
@@ -738,8 +757,13 @@ mod tests {
     fn a_hostile_chip_state_is_rejected() {
         let mut state = SaveState::create(&machine_with(b"EEPROM_V124"));
         let len = state.data.len();
-        let chip_at =
-            len - LIVE_LEN - ROM_ID_LEN - SIO_LEN - DMA_LATCHES_LEN - crate::cart::CHIP_STATE_LEN;
+        let chip_at = len
+            - RTC_LEN
+            - LIVE_LEN
+            - ROM_ID_LEN
+            - SIO_LEN
+            - DMA_LATCHES_LEN
+            - crate::cart::CHIP_STATE_LEN;
         let chip = &mut state.data[chip_at..];
         chip[7..9].copy_from_slice(&0xFFFFu16.to_le_bytes()); // EEPROM block
         let mut target = machine_with(b"EEPROM_V124");
@@ -773,9 +797,9 @@ mod tests {
     #[test]
     fn a_version_7_state_still_loads_with_clear_latches() {
         let mut state = SaveState::create(&Gba::new());
-        state
-            .data
-            .truncate(state.data.len() - LIVE_LEN - ROM_ID_LEN - SIO_LEN - DMA_LATCHES_LEN);
+        state.data.truncate(
+            state.data.len() - RTC_LEN - LIVE_LEN - ROM_ID_LEN - SIO_LEN - DMA_LATCHES_LEN,
+        );
         state.data[4..8].copy_from_slice(&7u32.to_le_bytes());
         let mut target = Gba::new();
         target.dma.channels[1].latch = 0xDEAD_BEEF;
@@ -789,6 +813,7 @@ mod tests {
         let mut state = SaveState::create(&machine_with(b"FLASH1M_V103"));
         state.data.truncate(
             state.data.len()
+                - RTC_LEN
                 - LIVE_LEN
                 - ROM_ID_LEN
                 - SIO_LEN
@@ -815,7 +840,7 @@ mod tests {
         let mut state = SaveState::create(&Gba::new());
         state
             .data
-            .truncate(state.data.len() - LIVE_LEN - ROM_ID_LEN - SIO_LEN);
+            .truncate(state.data.len() - RTC_LEN - LIVE_LEN - ROM_ID_LEN - SIO_LEN);
         state.data[4..8].copy_from_slice(&8u32.to_le_bytes());
         let mut target = Gba::new();
         target.bus.sio_cycles = 99;
@@ -828,7 +853,7 @@ mod tests {
     fn the_live_block_is_appended_last() {
         let gba = Gba::new();
         let mut v10 = SaveState::create(&gba);
-        v10.data.truncate(v10.data.len() - LIVE_LEN);
+        v10.data.truncate(v10.data.len() - RTC_LEN - LIVE_LEN);
         v10.data[4..8].copy_from_slice(&10u32.to_le_bytes());
         let rom_crc = gba.bus.cart.rom_crc().to_le_bytes();
         assert_eq!(v10.data[v10.data.len() - ROM_ID_LEN..], rom_crc);
@@ -839,7 +864,7 @@ mod tests {
     #[test]
     fn a_version_10_state_still_loads_with_derived_live_state() {
         let mut state = SaveState::create(&state_with_parts());
-        state.data.truncate(state.data.len() - LIVE_LEN);
+        state.data.truncate(state.data.len() - RTC_LEN - LIVE_LEN);
         state.data[4..8].copy_from_slice(&10u32.to_le_bytes());
 
         let mut target = Gba::new();
@@ -916,5 +941,52 @@ mod tests {
         state.restore(&mut target).expect("real values load");
         assert_eq!(target.irq_since, Some(4_998));
         assert_eq!(target.ppu.bg2x_internal, -(1 << 27) - 160 * 0x8000);
+    }
+
+    /// A ROM with Emerald's game code, so the cart carries the RTC.
+    fn rtc_machine() -> Gba {
+        let mut rom = vec![0u8; 0x200];
+        rom[0xAC..0xB0].copy_from_slice(b"BPEE");
+        let mut gba = Gba::new();
+        gba.load_rom(&rom).expect("ROM should load");
+        gba
+    }
+
+    /// The v12 block is last, and v11 had none: a v11 state on an RTC cart
+    /// loads with the RTC as a set-up cart holds it, not the target's.
+    #[test]
+    fn a_version_11_state_still_loads_with_a_set_up_rtc() {
+        let gba = rtc_machine();
+        let mut v11 = SaveState::create(&gba);
+        assert_eq!(
+            v11.data[v11.data.len() - RTC_LEN..],
+            gba.bus.cart.gpio_state()
+        );
+        v11.data.truncate(v11.data.len() - RTC_LEN);
+        v11.data[4..8].copy_from_slice(&11u32.to_le_bytes());
+
+        let mut target = rtc_machine();
+        target.bus.write16(0x0800_00C8, 1);
+        v11.restore(&mut target).expect("v11 state should load");
+        assert_eq!(
+            target.bus.cart.gpio_state(),
+            crate::cart::fresh_gpio_state()
+        );
+    }
+
+    /// GPIO bytes come from a file: a bit counter or buffer index past its
+    /// range would index out of bounds on the next clock edge.
+    #[test]
+    fn a_hostile_rtc_state_is_rejected() {
+        for (at, value) in [(8usize, 8u8), (11, 7), (9, 1)] {
+            let mut state = SaveState::create(&rtc_machine());
+            let len = state.data.len();
+            state.data[len - RTC_LEN + at] = value;
+            let mut target = rtc_machine();
+            assert!(
+                matches!(state.restore(&mut target), Err(SaveStateError::Corrupt(_))),
+                "byte {at} = {value} was accepted"
+            );
+        }
     }
 }

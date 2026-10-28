@@ -771,25 +771,37 @@ class, with what to test next, is
 owned, prioritised list is `ROADMAP.md`, Known accuracy gaps. Durable facts
 from the 2026-10-27 core audit, each confirmed in code:
 
-- **FIFO samples are lost while the CPU is halted.** The halted branch of
-  `Gba::step` (`core/src/lib.rs:141-153`) runs `apu.tick(step)` before
-  `post_tick` drains timer overflows into `Apu::on_timer_overflow`
-  (`core/src/apu/mod.rs:577`), and halted steps reach 960 cycles because the
-  sound timer has no IRQ to bound them. Several overflows collapse into one
-  heard pop; a probe at 24 kHz heard 197 of 401 pops a frame.
-- **A PSG frequency-byte write retriggers the note.** The trigger bit stays
-  latched in `io_regs`, and `Gba::apu_sound_write`
-  (`core/src/lib.rs:439-458`) re-reads the whole halfword on every byte write,
-  so m4a's lone `strb` to the frequency low byte restarts the envelope.
 - **ROM-dependent tests are not pins.** `gba_suite`, `homebrew_suites`, the
   ROM cases in `ppu.rs`, `integration.rs`, `input_slices.rs` and `tonerom.rs`
   print "skipping" and **pass** when their ROM is missing from `temp/roms/` -
   which it always is on a fresh clone and in CI. Behaviour that only those
   tests cover is unpinned there.
-- An unhandled SWI is a silent no-op: `Cpu::swi` (`cpu/mod.rs`) discards
-  `handle_swi`'s result and logs nothing.
 
 **Application**: before calling a PPU, APU or BIOS feature done, find a test
 that pins it without a ROM, or compare against mGBA (screenshot or audio
 envelope). A known-gaps list without an owner, priority and affected games is
 where debt goes to sit.
+
+### 2026-10-28 - Top five accuracy risks fixed; Emerald never halts
+
+- **Pokemon Emerald never enters HALT.** pokeemerald's `WaitForVBlank`
+  busy-waits on `gMain.intrCheck`: 0 halted steps in 600 frames, ~97k steps a
+  frame. Anything gated on the halted path does not reach Emerald; a fix that
+  must reach it has to cover the running path (and its DMA stalls).
+- **FIFO pops now happen at their overflow cycle** on every tick path:
+  `Timer::increment` records timer 0/1 overflow offsets in the slice,
+  `Gba::tick_apu` renders up to each before popping. Long DMA stalls collapsed
+  pops just like HALT did. Keep `tick_apu`'s fast check inline and the
+  interleave out of line: inlined, it cost ~5% a frame.
+- **The GPIO port lives in the bus's ROM copy** (`MemoryBus::sync_gpio_window`),
+  patched on each GPIO store. A guard in `MemoryBus::plain` cost 9%, and an
+  inlined GPIO arm in `store8` another ~8%: `store8` and `plain` are the hot
+  path, so anything new there goes out of line (`#[cold] #[inline(never)]`).
+- **RTC time** = host UTC + `MemoryBus::rtc_offset`, set by
+  `Gba::set_rtc_time(local secs)`; not in a save state. Save state is v12
+  (20-byte GPIO block last); `StateTransfer.kt` `STATE_VERSIONS` must reach 12.
+- **Audio envelope correlation vs mGBA depends on alignment granularity.**
+  `cmp.py` aligns in 20 ms windows; the RTC init path shifts Emerald's boot by
+  ~23 ms, dropping its figure 0.980 -> 0.970 with no audio change. Aligned to
+  1 ms (`temp/risks/finecmp.py`) both are 0.993.
+

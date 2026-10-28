@@ -30,18 +30,18 @@ Line counts and test counts as of 2026-10-27 (branch with #112 and #113).
 |--------|-------|--------|
 | `cpu/` | ~2630 | ARM + THUMB decoders, full banking, per-access cycle accounting and the prefetch buffer (#69). Passes gba-suite `arm`/`thumb`/`memory`/`bios`, FuzzARM and ARMWrestler. 46 tests in `core/tests/cpu.rs`. |
 | `ppu/` | ~1610 | Mode 0 verified against test ROMs and real games. Modes 1-5 are approximate: no OBJ-vs-BG priority, blend 2nd target by draw order, bitmap BG2 ignores its affine registers and windows. Bitmap modes honour the BG2 enable since #113. Optional interframe blending. |
-| `apu/` | ~1280 | 4 PSG channels + FIFO A/B. Frame sequencer at 512 Hz and SOUNDCNT_L/H routing and volume since #112. Driven by real games: *Yggdra Union*'s DMA music on a device since 2026-08-31, *Pokemon Emerald*'s title compared against mGBA (envelope correlation 0.665 -> 0.980). Mono output, no band-limiting, and two open timing bugs (see Known accuracy gaps). |
+| `apu/` | ~1280 | 4 PSG channels + FIFO A/B. Frame sequencer at 512 Hz and SOUNDCNT_L/H routing and volume since #112. Driven by real games: *Yggdra Union*'s DMA music on a device since 2026-08-31, *Pokemon Emerald*'s title compared against mGBA (envelope correlation 0.665 -> 0.980). Mono output, no band-limiting. FIFO pops at their overflow cycle and the PSG trigger is a write-only strobe since 2026-10-28. |
 | `memory/` + `io.rs` | ~1170 | Region mirroring, 8-bit video write rules, I/O read masks and open bus, per-region wait states from WAITCNT. |
 | `dma.rs` | ~380 | 4 channels, immediate/HBlank/VBlank/sound, latch, stall. Video capture (timing 3) absent. |
 | `timer/` | ~250 | Prescaler on global edges, cascade, IRQ timed from the overflow cycle. |
-| `cart/` | ~900 | ROM load, save type detection, SRAM, Flash with chip ID, EEPROM serial protocol with width from DMA length. No RTC. |
-| `savestate.rs` | ~920 | **Format v11**; v6-v11 load. Carries the ROM CRC-32 (a state from another ROM is refused) and the between-step live state. A rejected restore rolls back. Eight UI slots. |
-| `bios.rs` | ~700 | HLE SWIs. `BgAffineSet`/`ObjAffineSet` real since #112. `BitUnPack` is still a stub; `HuffUnComp`, `Stop`, `GetBiosChecksum`, `MidiKey2Freq` and the sound driver are absent, and an unhandled SWI is a silent no-op. |
+| `cart/` | ~900 | ROM load, save type detection, SRAM, Flash with chip ID, EEPROM serial protocol with width from DMA length. GPIO port with the S-3511 RTC (`cart/gpio.rs`, host clock plus a frontend offset) since 2026-10-28; no solar sensor, gyro or rumble. |
+| `savestate.rs` | ~920 | **Format v12** (v12 adds the GPIO/RTC block); v6-v12 load. Carries the ROM CRC-32 (a state from another ROM is refused) and the between-step live state. A rejected restore rolls back. Eight UI slots. |
+| `bios.rs` | ~700 | HLE SWIs. `BgAffineSet`/`ObjAffineSet` real since #112; `BitUnPack`, `HuffUnComp`, `GetBiosChecksum`, `MidiKey2Freq` and a GBATEK `RegisterRamReset` since 2026-10-28. `Stop` and the sound driver (0x1A-0x1E, 0x20-0x2A) are absent; an unhandled SWI logs one warning per number. |
 | `ffi.rs` | ~1040 | C ABI + JNI: input, frame buffer, audio, battery saves, save states as bytes, rewind, memory peek. **23** `GbaEngine_*` JNI exports. |
 | `rewind.rs` | ~85 | Bounded ring of save states, wired end to end, verified on a device. |
 | `android/` | ~12700 | Compose UI, JNI bridge, `AudioTrack` output as the clock, touch overlay with per-game layouts, saves and states, fast forward, rewind, achievements, 9 languages. Builds, installs and plays on a device. |
 | `android/.../cpp/` | ~940 | The Kotlin to `rcheevos` bridge plus CMake for the pinned submodule. The only C in the project, on the frontend side on purpose. |
-| tests | ~11700 | `core/tests/`: 19 files, ~9060 lines, 306 tests, plus 23 unit tests in `core/src` (`cargo test --release`: 331 passed, 1 ignored). `android/app/src/test/`: ~2650 lines of JVM JUnit. CI runs both plus an x86_64 emulator smoke test. Tests that need a ROM in `temp/roms/` print "skipping" and **pass** when it is missing, so in CI they are not gates. |
+| tests | ~11700 | `core/tests/`: 20 files, ~9600 lines, 325 tests, plus 26 unit tests in `core/src` (`cargo test --release`: 352 passed, 1 ignored). `android/app/src/test/`: ~2650 lines of JVM JUnit. CI runs both plus an x86_64 emulator smoke test. Tests that need a ROM in `temp/roms/` print "skipping" and **pass** when it is missing, so in CI they are not gates. |
 
 `ios/` is not tracked here. It is ~750 lines of SwiftUI with no Xcode project
 and has never been compiled; its status lives in
@@ -265,16 +265,16 @@ a class of games; **P3** rare or subtle. All are `core/` work, owned by
 
 | # | Gap | P | Games affected |
 |---|---|---|---|
-| 1 | **FIFO samples lost while halted.** The halted step runs `apu.tick` before `post_tick` pops the FIFO (`lib.rs`, halted branch), and steps reach 960 cycles, so several overflows collapse into one: 197 of 401 pops a frame audible at 24 kHz. | P1 | Nearly every commercial game's DMA music (grit, aliasing) |
-| 2 | **A PSG frequency-byte write retriggers the note.** The trigger bit stays latched and every byte write re-decodes the whole register (`Gba::apu_sound_write`). | P1 | Every m4a game's PSG vibrato and pitch bends, *Emerald* included |
-| 3 | **No RTC** (no GPIO at `0x080000C4`). | P1 | *Pokemon Ruby/Sapphire/Emerald* (dead battery, no clock events), Boktai |
-| 4 | **`BitUnPack` (SWI 0x10) is a stub**: copies bytes until a zero, ignores the unpack parameters. | P1 | Games that expand 1bpp fonts or icons |
+| 1 | ~~FIFO samples lost while halted~~ **Fixed 2026-10-28**: `Gba::tick_apu` pops each byte at its overflow cycle, halted or in a DMA stall. Tests `dma_sound_pops_every_overflow_while_the_cpu_is_halted`, `dma_sound_pops_every_overflow_during_a_long_dma`. | - | - |
+| 2 | ~~A PSG frequency-byte write retriggers the note~~ **Fixed 2026-10-28**. Tests `a_frequency_low_byte_write_does_not_retrigger_the_channel`, `the_trigger_bit_is_write_only_on_every_psg_channel`. | - | - |
+| 3 | ~~No RTC~~ **Fixed 2026-10-28** (`cart/gpio.rs`, `tests/rtc.rs`). Open: the Android side must call `nativeSetRtcTime` with local time, or the clock shows UTC; RTC time writes are dropped; Boktai's solar sensor is absent. | P2 | Boktai (sensor) |
+| 4 | ~~`BitUnPack` (SWI 0x10) is a stub~~ **Fixed 2026-10-28**. Tests `bit_unpack_expands_1bpp_to_4bpp_with_offset`, `bit_unpack_with_the_zero_flag_offsets_every_unit`. | - | - |
 | 5 | **Modes 1-5 have no per-pixel priority sort**: sprites always over BGs, the blend 2nd target is draw order, semi-transparent OBJs ignored. Fix together, as mode 0's sort (`ppu/mod.rs`, the `ponytail:` note). | P2 | Mode-1/2 overworlds and battle screens, affine-BG games (*Madden 06/07*) |
 | 6 | **Affine OBJ texels truncate toward zero** where hardware floors. | P2 | Every scaled or rotated sprite (*Emerald* intro, evolution) |
 | 7 | **Bitmap BG2 ignores PA-PD and BG2X/Y**; mode 5 paints black outside 160x128. | P2 | Mode-5 FMV and scaled video, mode 3/4 scroll and shake |
 | 8 | **Ch1 sweep with shift 0 writes freq + freq back.** | P2 | Sweep sound effects (jump, laser, coin) |
-| 9 | **`RegisterRamReset` clears all IWRAM** (GBATEK keeps the last 0x200 bytes) and ignores bits 5-7. | P2 | Callers that pushed LR before `swi 1`; sound state survives a reset |
-| 10 | **`HuffUnComp` absent, and an unhandled SWI is a silent no-op** with no log (`cpu/mod.rs` drops `handle_swi`'s result). | P2 | Huffman-compressed assets come out blank |
+| 9 | ~~`RegisterRamReset` clears all IWRAM~~ **Fixed 2026-10-28**. Tests `register_ram_reset_keeps_the_last_0x200_bytes_of_iwram`, `register_ram_reset_resets_the_io_register_groups`. | - | - |
+| 10 | ~~`HuffUnComp` absent, unhandled SWI silent~~ **Fixed 2026-10-28**. Tests `huff_uncomp_decodes_a_4bit_tree`, `huff_uncomp_decodes_an_8bit_tree`, `an_unhandled_swi_is_reported_once`. Still absent: `Stop`, sound-driver SWIs. | P3 | Rare |
 | 11 | **Windows do not mask BG2 in modes 3-5.** | P3 | Windowed cutscenes over a bitmap |
 | 12 | **Envelope reloaded on any SOUNDxCNT_H write**, not only on trigger. | P3 | PSG notes whose duty changes mid-note |
 | 13 | **Mono output, point-sampled resampling** (1.5-2x mGBA's energy above 6.4 kHz). Stereo needs an FFI change. | P3 | Panning lost everywhere; harsh high notes |

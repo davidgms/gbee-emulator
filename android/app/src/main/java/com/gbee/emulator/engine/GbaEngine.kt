@@ -97,7 +97,19 @@ class GbaEngine {
     fun loadRom(data: ByteArray): Boolean {
         ensureHandle()
         val result = nativeLoadRom(handle, data)
+        if (result == 0) syncRtc()
         return result == 0
+    }
+
+    /**
+     * Give the cartridge clock (Pokemon Ruby/Sapphire/Emerald, Boktai) the
+     * phone's local time. The core keeps it running from the host clock, so
+     * once per ROM load is enough.
+     */
+    private fun syncRtc() {
+        val nowMs = System.currentTimeMillis()
+        val offsetMs = java.util.TimeZone.getDefault().getOffset(nowMs)
+        nativeSetRtcTime(handle, (nowMs + offsetMs) / 1000)
     }
 
     /** Run a single frame of emulation. */
@@ -316,6 +328,7 @@ class GbaEngine {
     private external fun nativeLoadRom(handle: Long, data: ByteArray): Int
     private external fun nativeRunFrame(handle: Long)
     private external fun nativeReset(handle: Long)
+    private external fun nativeSetRtcTime(handle: Long, localUnixSecs: Long)
     private external fun nativeRunFrames(handle: Long, count: Int)
     private external fun nativeRunFrameSlice(handle: Long, index: Int, count: Int)
     private external fun nativeFrameBufferCopy(handle: Long, out: ByteArray)
