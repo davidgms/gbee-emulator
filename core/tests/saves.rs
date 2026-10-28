@@ -284,7 +284,7 @@ fn a_psg_channel_can_actually_be_triggered() {
     // 15 restarts the sound. SOUNDCNT_X bit 7 is the master enable.
     let mut gba = gba_with("SRAM_V100");
     gba.bus.write16(0x0400_0084, 0x0080); // master enable
-    gba.bus.write16(0x0400_0080, 0x0077); // both sides, full volume
+    gba.bus.write16(0x0400_0080, 0xFF77); // every channel to both sides, full volume
     gba.bus.write16(0x0400_0062, 0xF080); // volume 15, 50% duty
     gba.bus.write16(0x0400_0064, 0x8400); // frequency, restart
     gba.run_frame();
@@ -300,7 +300,7 @@ fn the_master_enable_silences_the_apu() {
     // SOUNDCNT_X bit 7 clear means "both PSG and FIFO sounds are disabled"
     // (GBATEK). This register was not routed to the APU at all.
     let mut gba = gba_with("SRAM_V100");
-    gba.bus.write16(0x0400_0080, 0x0077);
+    gba.bus.write16(0x0400_0080, 0xFF77);
     gba.bus.write16(0x0400_0062, 0xF080);
     gba.bus.write16(0x0400_0064, 0x8400);
     gba.bus.write16(0x0400_0084, 0x0000); // master enable OFF
@@ -626,7 +626,7 @@ fn two_bank_mode_plays_a_different_waveform_than_one_bank_mode() {
     fn play(dimension: u16) -> Vec<f32> {
         let mut gba = gba_with("SRAM_V100");
         gba.bus.write16(0x0400_0084, 0x0080);
-        gba.bus.write16(0x0400_0080, 0x0077);
+        gba.bus.write16(0x0400_0080, 0xFF77);
 
         // Bank 0 selected, so the window writes bank 1: fill it flat.
         gba.bus.write16(0x0400_0070, 0x0000);
@@ -668,7 +668,7 @@ fn channel_3_volume_codes_scale_the_wave_output() {
     fn level(cnt_h: u16) -> f32 {
         let mut gba = gba_with("SRAM_V100");
         gba.bus.write16(0x0400_0084, 0x0080); // master enable
-        gba.bus.write16(0x0400_0080, 0x0077); // both sides, full volume
+        gba.bus.write16(0x0400_0080, 0xFF77); // every channel to both sides, full volume
         gba.bus.write16(0x0400_0070, 0x0080); // bank 0 plays, channel on
         gba.bus.write16(0x0400_0072, cnt_h);
         gba.bus.write16(0x0400_0074, 0x87FF); // frequency, restart
@@ -711,7 +711,7 @@ fn channel_3_volume_codes_scale_the_wave_output() {
 fn channel_3_walks_its_waveform_instead_of_holding_one_nibble() {
     let mut gba = gba_with("SRAM_V100");
     gba.bus.write16(0x0400_0084, 0x0080); // master enable
-    gba.bus.write16(0x0400_0080, 0x0077); // both sides, full volume
+    gba.bus.write16(0x0400_0080, 0xFF77); // every channel to both sides, full volume
     gba.bus.write16(0x0400_0072, 0x2000); // volume code 1 -> 100%
 
     // Bank 1 selected, so the CPU window addresses bank 0 - the one that

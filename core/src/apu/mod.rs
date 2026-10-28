@@ -13,6 +13,17 @@ const WAVE_BANK_BYTES: usize = 16;
 /// collide; it is never a value read from or written to a register.
 const FORCE_75_VOLUME_CODE: u8 = 4;
 
+/// One step of the frame sequencer, which runs at 512 Hz (GBATEK, Sound
+/// Channel 1: sweep n/128 s, length (64-n)/256 s, envelope n/64 s).
+const FRAME_SEQ_STEP: u32 = (GBA_CLOCK / 512) as u32;
+
+/// Pole of the output DC blocker: a cutoff of about
+/// `SAMPLE_RATE / (2 * pi * 512)` = 15 Hz.
+const DC_BLOCK_POLE: f32 = 1.0 - 1.0 / 512.0;
+
+/// The frame sequencer's full cycle of eight steps.
+const FRAME_SEQ_PERIOD: u32 = FRAME_SEQ_STEP * 8;
+
 /// The rate the core hands samples to the frontend.
 ///
 /// 48 kHz is what Android's mixer runs at natively. The old rate was
@@ -172,9 +183,13 @@ pub struct Apu {
     sound_on: bool,
     sound1_vol: u8,
     sound2_vol: u8,
-    master_vol_left: u8,
-    master_vol_right: u8,
+    /// SOUNDCNT_L bits 0-7: PSG master volume, right in 0-2, left in 4-6.
+    psg_master: u8,
+    /// SOUNDCNT_L bits 8-15: channels 1-4 to the right (8-11), left (12-15).
+    psg_routing: u8,
     sound_out_mix: u8,
+    /// Position inside the frame sequencer's cycle, in system cycles
+    /// (`0..FRAME_SEQ_PERIOD`).
     envelope_tick_counter: u32,
     /// Timer that drives FIFO playback (0 or 1)
     pub fifo_timer: u8,
@@ -185,9 +200,14 @@ pub struct Apu {
     fifo_b_latch: i8,
     /// Cycles accumulated for FIFO sample output
     fifo_cycles: u32,
-    /// Whether FIFO A/B are enabled via SOUNDCNT_H
-    pub fifo_a_enabled: bool,
-    pub fifo_b_enabled: bool,
+    /// Where FIFO A/B go, from SOUNDCNT_H: bit 0 right, bit 1 left.
+    fifo_a_route: u8,
+    fifo_b_route: u8,
+    /// The DC blocker's previous input and output. Not saved: it settles in
+    /// a few tens of milliseconds, and `restore` zeroes it so a loaded state
+    /// sounds the same whatever was playing before.
+    dc_in: f32,
+    dc_out: f32,
 }
 
 impl Default for Apu {
@@ -274,8 +294,8 @@ impl Apu {
             sound_on: false,
             sound1_vol: 0,
             sound2_vol: 0,
-            master_vol_left: 0,
-            master_vol_right: 0,
+            psg_master: 0,
+            psg_routing: 0,
             sound_out_mix: 0,
             envelope_tick_counter: 0,
             fifo_timer: 0,
@@ -283,18 +303,23 @@ impl Apu {
             fifo_a_latch: 0,
             fifo_b_latch: 0,
             fifo_cycles: 0,
-            fifo_a_enabled: false,
-            fifo_b_enabled: false,
+            fifo_a_route: 0,
+            fifo_b_route: 0,
+            dc_in: 0.0,
+            dc_out: 0.0,
         }
     }
 
+    /// SOUNDCNT_L. GBATEK: bits 0-2 right master volume, 4-6 left, 8-11
+    /// channels 1-4 to the right, 12-15 to the left. This used to keep bits
+    /// 0-2 as the "left" volume and bits 8-10 as the "right" one, and the
+    /// mixer read neither.
     pub fn write_soundcnt_l(&mut self, value: u16) {
-        self.master_vol_left = (value & 0x07) as u8;
-        self.master_vol_right = ((value >> 8) & 0x07) as u8;
+        self.psg_master = (value & 0x77) as u8;
+        self.psg_routing = (value >> 8) as u8;
     }
 
     pub fn write_soundcnt_h(&mut self, value: u16) {
-        self.sound_out_mix = (value & 0xFF) as u8;
         // Bit 15 here is "DMA Sound B Reset FIFO", not a master enable
         // (GBATEK, Sound Control Registers). The master enable is SOUNDCNT_X
         // bit 7 - see `write_soundcnt_x`.
@@ -304,15 +329,28 @@ impl Apu {
         if value & 0x0800 != 0 {
             self.fifo_a.reset();
         }
+        self.write_mix(value);
+    }
+
+    /// Re-derive the mixer settings from SOUNDCNT_L and SOUNDCNT_H after a
+    /// state restore, without SOUNDCNT_H's FIFO resets. States from before
+    /// the mixer read these registers stored them decoded wrongly.
+    pub fn resync_mixer(&mut self, soundcnt_l: u16, soundcnt_h: u16) {
+        self.write_soundcnt_l(soundcnt_l);
+        self.write_mix(soundcnt_h);
+    }
+
+    /// The parts of SOUNDCNT_H that only configure the mixer.
+    fn write_mix(&mut self, value: u16) {
+        self.sound_out_mix = (value & 0xFF) as u8;
         // GBATEK, SOUNDCNT_H: bit 2 is DMA sound A's volume and bit 3 is B's -
         // they are not in SOUNDCNT_L, where this used to read them from bits
         // 12 and 13, which are two of the PSG channel enables.
         self.sound1_vol = ((value >> 2) & 1) as u8;
         self.sound2_vol = ((value >> 3) & 1) as u8;
-        // A channel is enabled if it is routed to either speaker: bits 8 and 9
-        // for A, 12 and 13 for B.
-        self.fifo_a_enabled = value & 0x0300 != 0;
-        self.fifo_b_enabled = value & 0x3000 != 0;
+        // Bits 8/9 send A to the right/left, 12/13 do the same for B.
+        self.fifo_a_route = ((value >> 8) & 3) as u8;
+        self.fifo_b_route = ((value >> 12) & 3) as u8;
         // Each FIFO picks its own timer: bit 10 for A, bit 14 for B.
         self.fifo_timer = ((value >> 10) & 1) as u8;
         self.fifo_b_timer = ((value >> 14) & 1) as u8;
@@ -395,6 +433,9 @@ impl Apu {
                 self.ch4.length_enabled = value & 0x4000 != 0;
                 if value & 0x8000 != 0 {
                     self.ch4.enabled = true;
+                    if self.ch4.length_counter >= 64 {
+                        self.ch4.length_counter = 0;
+                    }
                     self.ch4.lfsr = 0x7FFF;
                     self.ch4.freq_counter = 0;
                 }
@@ -465,6 +506,10 @@ impl Apu {
                 self.ch1.length_enabled = length_enabled;
                 if trigger {
                     self.ch1.enabled = true;
+                    // An expired length reloads to the full length.
+                    if self.ch1.length_counter >= 64 {
+                        self.ch1.length_counter = 0;
+                    }
                     self.ch1.freq_counter = 0;
                     self.ch1.sample_idx = 0;
                     self.ch1.volume_cur = self.ch1.volume_init;
@@ -475,6 +520,10 @@ impl Apu {
                 self.ch2.length_enabled = length_enabled;
                 if trigger {
                     self.ch2.enabled = true;
+                    // An expired length reloads to the full length.
+                    if self.ch2.length_counter >= 64 {
+                        self.ch2.length_counter = 0;
+                    }
                     self.ch2.freq_counter = 0;
                     self.ch2.sample_idx = 0;
                     self.ch2.volume_cur = self.ch2.volume_init;
@@ -485,6 +534,10 @@ impl Apu {
                 self.ch3.length_enabled = length_enabled;
                 if trigger {
                     self.ch3.enabled = true;
+                    // An expired length reloads to the full length.
+                    if self.ch3.length_counter >= 256 {
+                        self.ch3.length_counter = 0;
+                    }
                     self.ch3.freq_counter = 0;
                     self.ch3.sample_idx = 0;
                 }
@@ -587,6 +640,35 @@ impl Apu {
         }
     }
 
+    /// The 512 Hz frame sequencer: length on every even step (256 Hz),
+    /// sweep on steps 2 and 6 (128 Hz), envelope on step 7 (64 Hz).
+    ///
+    /// All three used to run together every 9856 cycles - 1702 Hz - so a
+    /// PSG note's envelope decayed 26 times too fast, its length ran out 6.6
+    /// times too soon and a sweep moved 13 times too quickly.
+    fn tick_frame_sequencer(&mut self, cycles: u32) {
+        // The modulo also tames a restored value from an older state or an
+        // edited one.
+        let start = u64::from(self.envelope_tick_counter % FRAME_SEQ_PERIOD);
+        let end = start + u64::from(cycles);
+        let step = u64::from(FRAME_SEQ_STEP);
+        let mut boundary = (start / step + 1) * step;
+        while boundary <= end {
+            let index = (boundary / step) % 8;
+            if index % 2 == 0 {
+                self.tick_length_counters();
+            }
+            if index == 2 || index == 6 {
+                self.tick_sweep();
+            }
+            if index == 7 {
+                self.tick_envelopes();
+            }
+            boundary += step;
+        }
+        self.envelope_tick_counter = (end % u64::from(FRAME_SEQ_PERIOD)) as u32;
+    }
+
     fn duty_wave(duty: u8, idx: u32) -> f32 {
         let phase = idx % 8;
         match duty {
@@ -636,33 +718,27 @@ impl Apu {
         // move when the output rate does.
         self.tick_channels(cycles);
 
-        // Envelope timer: tick every ~8 scanlines (59.73 Hz)
-        // 1232 cycles/scanline * 8 = 9856 cycles
-        // Saturating: a restored value near u32::MAX must not overflow.
-        self.envelope_tick_counter = self.envelope_tick_counter.saturating_add(cycles);
-        if self.envelope_tick_counter >= 9856 {
-            self.envelope_tick_counter -= 9856;
-            self.tick_envelopes();
-            self.tick_sweep();
-            self.tick_length_counters();
-        }
+        self.tick_frame_sequencer(cycles);
 
         self.sample_accum += cycles as u64 * SAMPLE_RATE as u64;
         while self.sample_accum >= GBA_CLOCK {
             self.sample_accum -= GBA_CLOCK;
 
-            let mut sample = 0.0f32;
+            // Every PSG channel spans a quarter of the output range at its
+            // loudest (GBATEK, Sound Control Registers), the DMA channels all
+            // of it at 100%.
+            let mut psg = [0.0f32; 4];
 
             // Channel 1: Square wave with sweep
             if self.ch1.enabled {
                 let duty_sample = Self::duty_wave(self.ch1.duty, self.ch1.sample_idx);
-                sample += duty_sample * (self.ch1.volume_cur as f32 / 15.0) * 0.25;
+                psg[0] = duty_sample * (self.ch1.volume_cur as f32 / 15.0) * 0.25;
             }
 
             // Channel 2: Square wave
             if self.ch2.enabled {
                 let duty_sample = Self::duty_wave(self.ch2.duty, self.ch2.sample_idx);
-                sample += duty_sample * (self.ch2.volume_cur as f32 / 15.0) * 0.25;
+                psg[1] = duty_sample * (self.ch2.volume_cur as f32 / 15.0) * 0.25;
             }
 
             // Channel 3: Wave
@@ -696,28 +772,61 @@ impl Apu {
                     FORCE_75_VOLUME_CODE => 0.75,
                     _ => 0.0,
                 };
-                sample += ((nibble as f32 / 15.0) - 0.5) * gain;
+                // Nibble 0-15 onto the same +/-0.25 a square spans; this
+                // was +/-0.5, twice as loud as the other PSG channels.
+                psg[2] = ((nibble as f32 / 15.0) - 0.5) * 0.5 * gain;
             }
 
-            // Channel 4: Noise
+            // Channel 4: Noise, the same range as a square.
             if self.ch4.enabled {
                 let noise_sample = if self.ch4.lfsr & 1 == 0 { 1.0 } else { -1.0 };
-                sample += noise_sample * (self.ch4.volume_cur as f32 / 15.0) * 0.15;
+                psg[3] = noise_sample * (self.ch4.volume_cur as f32 / 15.0) * 0.25;
             }
 
-            // FIFO A (Direct Sound A). The held latch, not a fresh pop.
-            if self.fifo_a_enabled {
-                let vol_a = if self.sound1_vol == 1 { 1.0 } else { 0.5 };
-                sample += (self.fifo_a_latch as f32 / 128.0) * vol_a;
+            // SOUNDCNT_H bits 0-1: 25%, 50%, 100% (3 is prohibited).
+            let psg_gain = match self.sound_out_mix & 3 {
+                0 => 0.25,
+                1 => 0.5,
+                _ => 1.0,
+            };
+            let side = |routing: u8, master: u8| -> f32 {
+                let sum: f32 = (0..4)
+                    .filter(|&i| routing & (1 << i) != 0)
+                    .map(|i| psg[i])
+                    .sum();
+                sum * psg_gain * f32::from(master + 1) / 8.0
+            };
+            let mut right = side(self.psg_routing & 0x0F, self.psg_master & 7);
+            let mut left = side(self.psg_routing >> 4, (self.psg_master >> 4) & 7);
+
+            // FIFO A and B (Direct Sound): the held latch, not a fresh pop.
+            let vol_a = if self.sound1_vol == 1 { 1.0 } else { 0.5 };
+            let vol_b = if self.sound2_vol == 1 { 1.0 } else { 0.5 };
+            let a = (self.fifo_a_latch as f32 / 128.0) * vol_a;
+            let b = (self.fifo_b_latch as f32 / 128.0) * vol_b;
+            for (route, value) in [(self.fifo_a_route, a), (self.fifo_b_route, b)] {
+                if route & 1 != 0 {
+                    right += value;
+                }
+                if route & 2 != 0 {
+                    left += value;
+                }
             }
 
-            // FIFO B (Direct Sound B)
-            if self.fifo_b_enabled {
-                let vol_b = if self.sound2_vol == 1 { 1.0 } else { 0.5 };
-                sample += (self.fifo_b_latch as f32 / 128.0) * vol_b;
-            }
-
-            self.sample_buffer.push(sample.clamp(-1.0, 1.0));
+            // Each side clips at the DAC's range on its own, and the
+            // frontend plays one channel: average the pair. Summing them
+            // made a game that pans its FIFOs apart twice as loud as the
+            // same game in mono.
+            let sample = (left.clamp(-1.0, 1.0) + right.clamp(-1.0, 1.0)) / 2.0;
+            // The GBA's output is AC-coupled, so DC never reaches the
+            // speaker. A one-pole high-pass around 15 Hz stands in for the
+            // coupling capacitor (mGBA's blip_buf filters the same way).
+            // Without it a square's duty showed up as a DC offset that
+            // stepped with every PSG note.
+            let out = sample - self.dc_in + DC_BLOCK_POLE * self.dc_out;
+            self.dc_in = sample;
+            self.dc_out = out;
+            self.sample_buffer.push(out);
         }
     }
 
@@ -1029,8 +1138,8 @@ impl Apu {
         buf.push(self.sound_on as u8);
         buf.extend_from_slice(&self.sound1_vol.to_le_bytes());
         buf.extend_from_slice(&self.sound2_vol.to_le_bytes());
-        buf.extend_from_slice(&self.master_vol_left.to_le_bytes());
-        buf.extend_from_slice(&self.master_vol_right.to_le_bytes());
+        buf.extend_from_slice(&self.psg_master.to_le_bytes());
+        buf.extend_from_slice(&self.psg_routing.to_le_bytes());
         buf.extend_from_slice(&self.sound_out_mix.to_le_bytes());
         buf.extend_from_slice(&self.envelope_tick_counter.to_le_bytes());
         buf.extend_from_slice(&self.fifo_timer.to_le_bytes());
@@ -1038,8 +1147,8 @@ impl Apu {
         buf.extend_from_slice(&self.fifo_a_latch.to_le_bytes());
         buf.extend_from_slice(&self.fifo_b_latch.to_le_bytes());
         buf.extend_from_slice(&self.fifo_cycles.to_le_bytes());
-        buf.push(self.fifo_a_enabled as u8);
-        buf.push(self.fifo_b_enabled as u8);
+        buf.push(self.fifo_a_route);
+        buf.push(self.fifo_b_route);
     }
 
     fn read_state(&mut self, cur: &mut &[u8]) -> Option<()> {
@@ -1059,8 +1168,8 @@ impl Apu {
         self.sound_on = take(cur, 1)?[0] != 0;
         self.sound1_vol = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
         self.sound2_vol = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
-        self.master_vol_left = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
-        self.master_vol_right = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
+        self.psg_master = take(cur, 1)?[0] & 0x77;
+        self.psg_routing = take(cur, 1)?[0];
         self.sound_out_mix = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
         self.envelope_tick_counter = u32::from_le_bytes(take(cur, 4)?.try_into().ok()?);
         self.fifo_timer = u8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
@@ -1068,8 +1177,8 @@ impl Apu {
         self.fifo_a_latch = i8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
         self.fifo_b_latch = i8::from_le_bytes(take(cur, 1)?.try_into().ok()?);
         self.fifo_cycles = u32::from_le_bytes(take(cur, 4)?.try_into().ok()?);
-        self.fifo_a_enabled = take(cur, 1)?[0] != 0;
-        self.fifo_b_enabled = take(cur, 1)?[0] != 0;
+        self.fifo_a_route = take(cur, 1)?[0] & 3;
+        self.fifo_b_route = take(cur, 1)?[0] & 3;
         Some(())
     }
 }
@@ -1084,6 +1193,8 @@ impl Apu {
 
     /// Restore from [`Apu::snapshot`]. Returns false if the data is short.
     pub fn restore(&mut self, data: &[u8]) -> bool {
+        self.dc_in = 0.0;
+        self.dc_out = 0.0;
         let mut cur = data;
         self.read_state(&mut cur).is_some()
     }

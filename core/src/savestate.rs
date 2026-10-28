@@ -367,6 +367,12 @@ impl SaveState {
         if !gba.apu.restore(&apu) {
             return Err(SaveStateError::InsufficientData);
         }
+        // From the latched registers: older states stored SOUNDCNT_L and the
+        // FIFO routing decoded wrongly, and the bytes were kept rather than
+        // the layout changed.
+        let soundcnt_l = gba.bus.io_read16(0x0400_0080);
+        let soundcnt_h = gba.bus.io_read16(0x0400_0082);
+        gba.apu.resync_mixer(soundcnt_l, soundcnt_h);
 
         let save_len = read_u32(&mut cursor)? as usize;
         if save_len > self.data.len().saturating_sub(cursor.position() as usize) {

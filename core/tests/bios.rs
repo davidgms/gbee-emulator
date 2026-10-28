@@ -862,3 +862,78 @@ fn decompressors_wrap_addresses_at_the_top_of_the_map() {
         run_swi(swi, [0xFFFF_FFFC, 0xFFFF_FFF0, 0, 0]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Affine sets (Pokemon Emerald's sprites)
+// ---------------------------------------------------------------------------
+
+/// Write a halfword list starting at `addr`.
+fn write_halves(bus: &mut MemoryBus, addr: u32, halves: &[u16]) {
+    for (i, &h) in halves.iter().enumerate() {
+        bus.write16(addr + i as u32 * 2, h);
+    }
+}
+
+fn read_i16(bus: &MemoryBus, addr: u32) -> i16 {
+    bus.read16(addr) as i16
+}
+
+/// Run `swi n` on a bus the caller already filled.
+fn run_swi_on(mut bus: MemoryBus, n: u32, args: [u32; 4]) -> MemoryBus {
+    bus.write32(BASE, arm_swi(n));
+    let mut cpu = Cpu::new();
+    cpu.registers[15] = BASE;
+    cpu.registers[13] = 0x0300_7F00;
+    cpu.registers[..4].copy_from_slice(&args);
+    cpu.step(&mut bus);
+    bus
+}
+
+/// GBATEK, ObjAffineSet: each 8-byte source entry is (sx, sy, angle, pad) and
+/// produces pa = sx*cos, pb = -sx*sin, pc = sy*sin, pd = sy*cos, written
+/// `r3` bytes apart. The stub wrote 0x100 and 0 to pa and pb and never
+/// touched pc and pd, so Emerald's affine sprites (the intro's Lotad, the
+/// starter picker) were drawn with stack garbage as their matrix - squashed
+/// to a line or smeared into a blob.
+#[test]
+fn obj_affine_set_rotates_and_scales_at_the_oam_stride() {
+    let mut bus = MemoryBus::new();
+    // Entry 0: x 1.0, y 2.0, 90 degrees. Entry 1: x 0.5, y 1.0, no rotation.
+    write_halves(
+        &mut bus,
+        DATA,
+        &[0x100, 0x200, 0x4000, 0, 0x80, 0x100, 0, 0],
+    );
+    let bus = run_swi_on(bus, 0x0F, [DATA, DEST, 2, 8]);
+    let got: Vec<i16> = (0..8).map(|i| read_i16(&bus, DEST + i * 8)).collect();
+    assert_eq!(got, [0, -0x100, 0x200, 0, 0x80, 0, 0, 0x100]);
+}
+
+/// Emerald calls ObjAffineSet with r3 = 2 into a packed `{a, b, c, d}`
+/// struct, then copies that into OAM itself.
+#[test]
+fn obj_affine_set_packs_a_matrix_at_stride_two() {
+    let mut bus = MemoryBus::new();
+    // 45 degrees, x scale 1.0, y scale 1.0: sin = cos = 0x2D41 / 0x4000.
+    write_halves(&mut bus, DATA, &[0x100, 0x100, 0x2000, 0]);
+    write_halves(&mut bus, DEST, &[0xAAAA; 4]);
+    let bus = run_swi_on(bus, 0x0F, [DATA, DEST, 1, 2]);
+    let got: Vec<i16> = (0..4).map(|i| read_i16(&bus, DEST + i * 2)).collect();
+    assert_eq!(got, [0xB5, -0xB5, 0xB5, 0xB5]);
+}
+
+/// GBATEK, BgAffineSet: source is (s32 ox, s32 oy, s16 cx, s16 cy, s16 sx,
+/// s16 sy, u16 angle), destination (pa, pb, pc, pd, s32 x, s32 y) with
+/// x = ox - (pa*cx + pb*cy) and y = oy - (pc*cx + pd*cy).
+#[test]
+fn bg_affine_set_computes_the_matrix_and_the_start_point() {
+    let mut bus = MemoryBus::new();
+    bus.write32(DATA, 0x1000);
+    bus.write32(DATA + 4, 0x2000);
+    write_halves(&mut bus, DATA + 8, &[8, 4, 0x100, 0x100, 0x4000, 0]);
+    let bus = run_swi_on(bus, 0x0E, [DATA, DEST, 1, 0]);
+    let m: Vec<i16> = (0..4).map(|i| read_i16(&bus, DEST + i * 2)).collect();
+    assert_eq!(m, [0, -0x100, 0x100, 0]);
+    assert_eq!(bus.read32(DEST + 8) as i32, 0x1400);
+    assert_eq!(bus.read32(DEST + 12) as i32, 0x1800);
+}

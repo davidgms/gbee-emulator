@@ -1413,9 +1413,8 @@ of Mario Tennis, Yggdra and Celeste identical after 1500 frames.
   Counters with no tight legitimate bound (`length_counter`, envelope/sweep
   ticks, `envelope_tick_counter`) saturate instead of being validated.
 - HLE BgAffineSet/ObjAffineSet cap r2 at `AFFINE_SET_MAX` (0x10000) and every
-  guest-address add in `bios.rs` wraps. Both affine handlers are still stubs
-  that write identity matrices; ObjAffineSet also reads its source at a
-  4-byte stride where GBATEK says 8. Accuracy debt, not fixed here.
+  guest-address add in `bios.rs` wraps. (The identity-matrix stubs noted here
+  were real and broke Pokemon Emerald's sprites; fixed 2026-10-27, see below.)
 - JNI `nativeStateWrite`/`nativeSaveWrite` call the C ABI functions, so
   `guarded` lives in one place; `tests/jni_exports.rs` checks it by reading
   `ffi.rs`, since the JNI block never compiles on the host.
@@ -1487,3 +1486,28 @@ of Mario Tennis, Yggdra and Celeste identical after 1500 frames.
   the same lock that serialises unload (`RaEngine.coreLock`), or the strings are freed under it (P5-RE-2).
 - `nativeServerResponse` has no size cap in C and the body is not NUL-terminated; the 16 MiB cap is
   Kotlin-only (`RaEngine.kt` `MAX_RESPONSE_BYTES`).
+
+## 2026-10-27 - Pokemon Emerald: affine sprites and PSG sound (rust-engineer)
+
+- **ObjAffineSet/BgAffineSet were stubs** writing pa=0x100, pb=0 and never pc/pd. Emerald calls
+  SWI 0x0F every frame (r3 = 2, packed matrix) for every affine sprite, so Lotad in Birch's intro
+  and the starter picker drew with stack garbage as pc/pd (lines, smears). Now real: 1.14 sine
+  table, `asr #14`, pb negated after the shift (`bios.rs` `affine_matrix`). Tests in
+  `tests/bios.rs` (`obj_affine_set_*`, `bg_affine_set_*`). **BitUnPack (SWI 0x10) is still a stub**
+  (copies bytes until a zero) - same class of debt, unfixed.
+- **APU frame sequencer ran at 1702 Hz** (every 9856 cycles) for envelope, sweep and length alike.
+  Emerald's m4a uses the hardware envelope (step 1-2, decreasing) for its square-wave
+  instruments, so PSG notes died ~26x too fast. Now 512 Hz with length/sweep/envelope on steps
+  even/2,6/7; `envelope_tick_counter` reused as the position in the 8-step cycle (no layout change).
+- The mixer ignored SOUNDCNT_L (routing + master volume) and SOUNDCNT_H bits 0-1 (PSG 25/50/100%),
+  the wave channel was 2x the other PSGs, the mono output summed L+R instead of averaging, and a
+  square's duty left a DC offset (thumps). `tests/apu.rs` covers each. `savestate.rs` re-derives
+  the mixer from the latched SOUNDCNT_L/H after restore (`Apu::resync_mixer`), so older states
+  that stored the wrong decode still sound right; APU blob length unchanged.
+- **Comparing audio against mGBA works headless**: `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=disk
+  SDL_DISKAUDIOFILE=<abs path>.raw timeout 45 temp/mgba/run.sh <rom>` writes 44.1 kHz stereo s16
+  of the boot/intro/title (no input needed). Boot GBee for the same frames, compare 20 ms RMS
+  envelopes after aligning by cross-correlation. Emerald title: envelope correlation 0.665 before,
+  0.980 after. Scripts: `temp/emerald/scripts/cmp.py`, probe `temp/emerald/probe` (writes PNG with
+  no deps). Remaining gap: GBee has ~1.5-2x mGBA's energy above 6.4 kHz (point-sampled output, no
+  band-limiting), not addressed. `temp/mgba/run.sh` had the old GeeBeeAyy path; fixed.
