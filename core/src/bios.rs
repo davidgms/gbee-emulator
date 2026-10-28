@@ -364,43 +364,93 @@ fn handle_cpu_fast_set(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
 /// call a game can make use of is cut short.
 const AFFINE_SET_MAX: u32 = 0x1_0000;
 
+/// `sin(angle)` in 1.14 fixed point, for the upper byte of a BIOS angle
+/// (0x00-0xFF = one full turn).
+///
+/// The real BIOS reads a 256-entry table instead. Rounding the f64 sine is
+/// not checked against a BIOS dump and may be one LSB off on some entries
+/// (1/256 px on an affine sprite); 0x40 lands on 0x4000.
+fn bios_sin(index: u32) -> i32 {
+    let turn = f64::from(index & 0xFF) / 256.0 * std::f64::consts::TAU;
+    (turn.sin() * 16384.0).round() as i32
+}
+
+/// The affine matrix both affine sets share, in 8.8 fixed point:
+/// pa = sx*cos, pb = -sx*sin, pc = sy*sin, pd = sy*cos (GBATEK, BIOS
+/// Rotation/Scaling Functions). Only the upper byte of the angle is used.
+///
+/// Products are shifted arithmetically (the BIOS's `asr #14`) and pb is
+/// negated after the shift. mGBA computes the same matrix in float and
+/// truncates, which differs from this by one in the last bit on some
+/// negative entries.
+fn affine_matrix(sx: i32, sy: i32, angle: u16) -> [i32; 4] {
+    let step = u32::from(angle >> 8);
+    let (sin, cos) = (bios_sin(step), bios_sin(step + 0x40));
+    [
+        (sx * cos) >> 14,
+        -((sx * sin) >> 14),
+        (sy * sin) >> 14,
+        (sy * cos) >> 14,
+    ]
+}
+
+/// SWI 0x0E: BgAffineSet(r0 = src, r1 = dst, r2 = count).
+///
+/// GBATEK: each 20-byte source entry is s32 ox, s32 oy (8.8, texture
+/// centre), s16 cx, s16 cy (screen centre), s16 sx, s16 sy (8.8 scale) and a
+/// u16 angle; each 16-byte destination entry is pa, pb, pc, pd and the s32
+/// start point x = ox - (pa*cx + pb*cy), y = oy - (pc*cx + pd*cy).
 fn handle_bg_affine_set(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
     let src = cpu.reg(0);
     let dst = cpu.reg(1);
     let count = cpu.reg(2).min(AFFINE_SET_MAX);
     for i in 0..count {
-        let src_off = src.wrapping_add(i * 20);
-        let dst_off = dst.wrapping_add(i * 16);
-        let _orig_x = bus.read32(src_off) as i32;
-        let _orig_y = bus.read32(src_off.wrapping_add(4)) as i32;
-        let _aff_x = bus.read32(src_off.wrapping_add(8)) as i32;
-        let _aff_y = bus.read32(src_off.wrapping_add(12)) as i32;
-        let _theta = bus.read16(src_off.wrapping_add(16)) as i16;
-        bus.write16(dst_off, 0x0100);
-        bus.write16(dst_off.wrapping_add(2), 0);
-        bus.write16(dst_off.wrapping_add(4), 0);
-        bus.write16(dst_off.wrapping_add(6), 0x0100);
-        bus.write32(dst_off.wrapping_add(8), 0);
-        bus.write32(dst_off.wrapping_add(12), 0);
+        let src_off = src.wrapping_add(i.wrapping_mul(20));
+        let dst_off = dst.wrapping_add(i.wrapping_mul(16));
+        let half = |o: u32| i32::from(bus.read16(src_off.wrapping_add(o)) as i16);
+        let ox = bus.read32(src_off) as i32;
+        let oy = bus.read32(src_off.wrapping_add(4)) as i32;
+        let (cx, cy) = (half(8), half(10));
+        let m = affine_matrix(half(12), half(14), bus.read16(src_off.wrapping_add(16)));
+        for (k, &v) in m.iter().enumerate() {
+            bus.write16(dst_off.wrapping_add(k as u32 * 2), v as u16);
+        }
+        let x = ox.wrapping_sub(m[0].wrapping_mul(cx).wrapping_add(m[1].wrapping_mul(cy)));
+        let y = oy.wrapping_sub(m[2].wrapping_mul(cx).wrapping_add(m[3].wrapping_mul(cy)));
+        bus.write32(dst_off.wrapping_add(8), x as u32);
+        bus.write32(dst_off.wrapping_add(12), y as u32);
     }
     true
 }
 
+/// SWI 0x0F: ObjAffineSet(r0 = src, r1 = dst, r2 = count, r3 = stride).
+///
+/// GBATEK: each 8-byte source entry is s16 sx, s16 sy (8.8), u16 angle and
+/// padding; pa, pb, pc and pd go `r3` bytes apart (2 for a packed matrix, 8
+/// straight into OAM), and the next entry starts `4 * r3` after.
+///
+/// This was a stub that wrote 0x100 and 0 to pa and pb and left pc and pd
+/// alone - Pokemon Emerald draws every affine sprite through it, so they came
+/// out as lines and smears with stack garbage for a matrix.
 fn handle_obj_affine_set(cpu: &mut Cpu, bus: &mut MemoryBus) -> bool {
     let src = cpu.reg(0);
     let dst = cpu.reg(1);
     let count = cpu.reg(2).min(AFFINE_SET_MAX);
     let stride = cpu.reg(3);
     for i in 0..count {
-        let src_off = src.wrapping_add(i * 4);
-        let _sx = bus.read16(src_off) as i16 as i32;
-        let _sy = bus.read16(src_off.wrapping_add(2)) as i16 as i32;
-        let _theta = bus.read16(src_off.wrapping_add(4)) as i16;
+        let src_off = src.wrapping_add(i.wrapping_mul(8));
+        let sx = i32::from(bus.read16(src_off) as i16);
+        let sy = i32::from(bus.read16(src_off.wrapping_add(2)) as i16);
+        let m = affine_matrix(sx, sy, bus.read16(src_off.wrapping_add(4)));
         // A negative stride is two's complement, so wrapping u32 maths is the
         // signed offset.
-        let dst_off = dst.wrapping_add(stride.wrapping_mul(i));
-        bus.write16(dst_off, 0x0100);
-        bus.write16(dst_off.wrapping_add(2), 0);
+        let dst_off = dst.wrapping_add(stride.wrapping_mul(4).wrapping_mul(i));
+        for (k, &v) in m.iter().enumerate() {
+            bus.write16(
+                dst_off.wrapping_add(stride.wrapping_mul(k as u32)),
+                v as u16,
+            );
+        }
     }
     true
 }
