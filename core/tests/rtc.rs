@@ -177,3 +177,33 @@ fn a_save_state_carries_the_rtc_registers() {
     other.load_state(&state).expect("state should load");
     assert_eq!(read_command(&mut other, 0x63, 1), [0x00]);
 }
+
+/// The cartridge bus carries no wait-state signal: 0x08, 0x0A and 0x0C are
+/// the same addresses to the ROM chip, so the port answers stores and loads
+/// in all three. Reads already showed it everywhere while stores only
+/// reached it through 0x08.
+#[test]
+fn the_gpio_port_answers_in_every_rom_waitstate_mirror() {
+    for base in [0x0800_0000u32, 0x0A00_0000, 0x0C00_0000] {
+        let mut gba = emerald();
+        gba.bus.write16(base + 0xC8, 1);
+        for read in [0x0800_0000u32, 0x0A00_0000, 0x0C00_0000] {
+            assert_eq!(
+                gba.bus.read16(read + 0xC8),
+                1,
+                "enabled through {base:#x}, read through {read:#x}"
+            );
+        }
+    }
+}
+
+/// GBATEK, GBA Cart I/O Port: "ROM-bus writes are limited to 16bit/32bit
+/// access (STRB opcodes are ignored)". mGBA ignores them too.
+#[test]
+fn a_byte_store_to_the_gpio_port_is_ignored() {
+    let mut gba = emerald();
+    gba.bus.write8(CTRL, 1);
+    assert_eq!(gba.bus.read16(DATA), 0x5A5A, "STRB made the port readable");
+    gba.bus.write32(CTRL, 1);
+    assert_eq!(gba.bus.read16(CTRL), 1, "STR must still reach it");
+}

@@ -26,9 +26,9 @@ pub struct Timer {
 }
 
 /// Overflows of one sound timer `tick` records per slice. A sound timer at
-/// 65 kHz overflows 16 times in a 4000-cycle DMA; any past this play at the
-/// slice's end, as before.
-pub(crate) const SOUND_OVERFLOWS: usize = 16;
+/// 65 kHz overflows 64 times in a 16000-cycle DMA (8 KB into EWRAM); any past
+/// this play at the slice's end.
+pub(crate) const SOUND_OVERFLOWS: usize = 64;
 
 impl Default for Timer {
     fn default() -> Self {

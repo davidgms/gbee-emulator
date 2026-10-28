@@ -285,9 +285,9 @@ impl Gba {
     #[inline(never)]
     fn tick_apu_with_overflows(&mut self, cycles: u32) {
         let [a, b] = std::mem::take(&mut self.timer.sound_overflows);
-        let at = self.timer.sound_overflow_at;
         let (mut i, mut j, mut done) = (0, 0, 0);
         while i < a || j < b {
+            let at = &self.timer.sound_overflow_at;
             let timer = if j >= b || (i < a && at[0][i] <= at[1][j]) {
                 0
             } else {
@@ -297,11 +297,43 @@ impl Gba {
             let when = at[timer][*next].clamp(done, cycles);
             *next += 1;
             self.apu.tick(when - done);
+            // The sound DMA request comes as the FIFO drains, so a slice
+            // holding more pops than the FIFO does must be refilled between
+            // them; once per slice, it ran dry halfway through a long stall.
+            self.refill_fifos();
             self.apu.on_timer_overflow(timer as u8);
             self.timer.overflow_flags[timer] -= 1;
             done = when;
         }
         self.apu.tick(cycles - done);
+    }
+
+    /// Top up each FIFO at or below half full from the sound DMA feeding it.
+    ///
+    /// Either channel can feed either FIFO - the destination register
+    /// decides, not the channel number. Keying FIFO A to DMA1 and B to DMA2
+    /// dropped the data of any game that wired them the other way round,
+    /// *after* `do_sound_transfer` had already advanced the source.
+    fn refill_fifos(&mut self) {
+        for ch in [1usize, 2] {
+            let wanted = match self.dma.channels[ch].dest {
+                0x0400_00A0 => self.apu.fifo_a_half_empty(),
+                0x0400_00A4 => self.apu.fifo_b_half_empty(),
+                _ => false,
+            };
+            if !wanted {
+                continue;
+            }
+            if let Some((dest, data)) = self.dma.do_sound_transfer(ch, &mut self.bus) {
+                for &byte in &data {
+                    if dest == 0x0400_00A0 {
+                        self.apu.write_fifo_a(byte as i8);
+                    } else {
+                        self.apu.write_fifo_b(byte as i8);
+                    }
+                }
+            }
+        }
     }
 
     /// The CPU cycles the DMA transfers since the last call stall it for.
@@ -422,29 +454,7 @@ impl Gba {
     }
 
     fn post_tick(&mut self) {
-        // DMA Sound. Either channel can feed either FIFO - the destination
-        // register decides, not the channel number. Keying FIFO A to DMA1 and
-        // B to DMA2 dropped the data of any game that wired them the other way
-        // round, *after* `do_sound_transfer` had already advanced the source.
-        for ch in [1usize, 2] {
-            let wanted = match self.dma.channels[ch].dest {
-                0x0400_00A0 => self.apu.fifo_a_half_empty(),
-                0x0400_00A4 => self.apu.fifo_b_half_empty(),
-                _ => false,
-            };
-            if !wanted {
-                continue;
-            }
-            if let Some((dest, data)) = self.dma.do_sound_transfer(ch, &mut self.bus) {
-                for &byte in &data {
-                    if dest == 0x0400_00A0 {
-                        self.apu.write_fifo_a(byte as i8);
-                    } else {
-                        self.apu.write_fifo_b(byte as i8);
-                    }
-                }
-            }
-        }
+        self.refill_fifos();
 
         let overflows = self.timer.drain_overflows();
         for (i, &count) in overflows.iter().enumerate() {

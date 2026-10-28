@@ -626,6 +626,11 @@ impl MemoryBus {
                 }
             }
             0x0700_0000..=0x07FF_FFFF => {}
+            // GBATEK, GBA Cart I/O Port: "ROM-bus writes are limited to
+            // 16bit/32bit access (STRB opcodes are ignored)", and the GPIO
+            // port is the only thing a ROM-area store reaches. mGBA agrees
+            // on STRB; it also drops 32-bit stores, GBATEK allows them.
+            0x0800_0000..=0x0DFF_FFFF => {}
             _ => self.store8(address, value),
         }
     }
@@ -704,7 +709,12 @@ impl MemoryBus {
             0x0600_0000..=0x06FF_FFFF => self.vram[Self::vram_offset(address)] = value,
             0x0700_0000..=0x07FF_FFFF => self.oam[(address & 0x3FF) as usize] = value,
             0x0E00_0000..=0x0FFF_FFFF => self.cart.save_write(address, value),
-            0x0800_00C4..=0x0800_00C9 => self.gpio_store(address, value),
+            // The port in any wait-state mirror: the cartridge bus carries no
+            // wait-state signal, so 0x08, 0x0A and 0x0C are one address to
+            // the ROM chip (0x09/0x0B/0x0D set A24 and miss it).
+            0x0800_0000..=0x0DFF_FFFF if (address & 0x01FF_FFFF).wrapping_sub(0xC4) < 6 => {
+                self.gpio_store(address, value)
+            }
             _ => {}
         }
     }

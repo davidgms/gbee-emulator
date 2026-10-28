@@ -1149,3 +1149,47 @@ fn huff_uncomp_decodes_an_8bit_tree() {
     let bus = huffman(8, [0x41, 0x42, 0x43], 4, 0b010110 << 26);
     assert_eq!(bus.read32(DEST), 0x4143_4241);
 }
+
+/// BitUnPack writes whole words only: a stream that ends mid-word leaves the
+/// partial word unwritten. mGBA's `_unBitPack` stores only when 32 bits are
+/// full, and GBATEK describes the output as 32-bit units; pinned here so a
+/// "fix" that flushes it is a deliberate choice.
+#[test]
+fn bit_unpack_drops_a_partial_final_word() {
+    const INFO: u32 = DATA + 0x100;
+    let mut bus = MemoryBus::new();
+    write_bytes(&mut bus, DATA, &[0xFF, 0xFF, 0xFF]);
+    bus.write16(INFO, 3);
+    write_bytes(&mut bus, INFO + 2, &[1, 2]); // 24 units -> 48 bits
+    bus.write32(INFO + 4, 0);
+    bus.write32(DEST + 4, 0xAAAA_AAAA);
+    let bus = run_swi_on(bus, 0x10, [DATA, DEST, INFO, 0]);
+    assert_eq!(bus.read32(DEST), 0x5555_5555);
+    assert_eq!(
+        bus.read32(DEST + 4),
+        0xAAAA_AAAA,
+        "the partial word was written"
+    );
+}
+
+/// HuffUnComp writes in 32-bit units, so a size that is not a multiple of 4
+/// rounds up to the next word - mGBA's `_unHuffman` loops `while remaining >
+/// 0` subtracting 4 per word, and GBATEK says the output is 32-bit units.
+/// Pinned so the round-up is a known behaviour, not an accident.
+#[test]
+fn huff_uncomp_writes_whole_words_past_an_unaligned_size() {
+    let mut bus = MemoryBus::new();
+    bus.write32(DEST + 8, 0xAAAA_AAAA);
+    bus.write32(DATA, (5 << 8) | 0x28);
+    write_bytes(&mut bus, DATA + 4, &[3, 0x80, 0x41, 0xC0, 0x42, 0x43, 0, 0]);
+    // Eight As: 0 x 8.
+    bus.write32(DATA + 12, 0);
+    let bus = run_swi_on(bus, 0x13, [DATA, DEST, 0, 0]);
+    assert_eq!(bus.read32(DEST), 0x4141_4141);
+    assert_eq!(bus.read32(DEST + 4), 0x4141_4141, "rounded up to the word");
+    assert_eq!(
+        bus.read32(DEST + 8),
+        0xAAAA_AAAA,
+        "no further than the word"
+    );
+}

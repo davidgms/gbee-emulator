@@ -298,6 +298,34 @@ fn dma_sound_pops_every_overflow_during_a_long_dma() {
     );
 }
 
+/// A slice with more overflows than the FIFO holds: a 2048-word DMA3 stalls
+/// the CPU for about 24600 cycles, 35 pops of a FIFO that holds at most 32
+/// bytes and is refilled 16 at a time. The refill has to run between the
+/// pops, as the hardware's sound DMA request does, not once per slice: the
+/// FIFO ran dry halfway through and the second half of every slice held one
+/// byte.
+#[test]
+fn a_long_slice_refills_the_fifo_between_pops() {
+    let mut gba = dma_sound_gba();
+    gba.run_frame();
+    gba.clear_audio_buffer();
+    let start = gba.cycles;
+    while gba.cycles < start + 280_896 {
+        gba.bus.write32(0x0400_00D4, 0x0201_0000);
+        gba.bus.write32(0x0400_00D8, 0x0202_0000);
+        gba.bus.write16(0x0400_00DC, 2048);
+        gba.bus.write16(0x0400_00DE, 0x8400);
+        gba.step();
+    }
+    // The last slice runs past the frame, so count what actually ran.
+    let expected = ((gba.cycles - start) / 700) as usize;
+    let flips = sign_flips(gba.apu_samples());
+    assert!(
+        flips.abs_diff(expected) <= 6,
+        "{flips} sign changes with 35 pops a slice, expected ~{expected}"
+    );
+}
+
 /// The registers of a square on channel 2 through the bus: SOUND2CNT_L
 /// envelope `envelope`, SOUND2CNT_H frequency 0x780 with the trigger.
 fn psg_gba(envelope: u16) -> gbee_core::Gba {

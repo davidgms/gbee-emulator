@@ -166,6 +166,13 @@ impl Gpio {
         self.index = 0;
         self.buf = [0xFF; 7];
         match (command >> 4) & 7 {
+            // GBATEK: force reset also sets the date and time to
+            // 2000-01-01 00:00:00. Kept on host time on purpose, as mGBA
+            // does: the clock here is the frontend's (`Gba::set_rtc_time`),
+            // and a reset that moved it would last only until the next ROM
+            // load re-sets it. Emerald resets the chip whenever it finds it
+            // in 12-hour mode, so following GBATEK would jump its clock to
+            // 2000 for that session.
             0 => self.control = 0,
             4 => self.buf[0] = self.control,
             2 => self.buf = self.date_time(now()),

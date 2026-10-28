@@ -77,7 +77,9 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 **Fixed 2026-10-28.** `Timer::increment` records where in the slice timers 0
 and 1 overflowed (`sound_overflow_at`), and `Gba::tick_apu` renders the APU up
 to each overflow before popping the FIFO, on all three tick paths (running,
-halted, late DMA stall). The same collapse hit the running CPU during a long
+halted, late DMA stall), refilling the FIFOs from sound DMA before each pop
+(`Gba::refill_fifos`, up to 64 recorded overflows per timer per slice; test
+`a_long_slice_refills_the_fifo_between_pops`). The same collapse hit the running CPU during a long
 DMA stall, which the original write-up missed: a 320-word DMA3 per step left 34
 of ~401 sign changes. Correction to "Games" below: **Emerald never halts** -
 pokeemerald's `WaitForVBlank` busy-waits on `gMain.intrCheck` (0 halted steps
@@ -127,7 +129,10 @@ direction and control; S-3511 reset, control, date/time and time, bits LSB
 first with the command's fixed code in the low nibble (mGBA #1721). Power-on
 control 0x40. Time is the host clock plus an offset the frontend sets with
 `Gba::set_rtc_time` / `gbee_set_rtc_time` / JNI `nativeSetRtcTime`; date and
-time writes are dropped, no RTC IRQ. The readable port is patched into the
+time writes are dropped, no RTC IRQ. The port answers in the 0x08, 0x0A and
+0x0C mirrors; STRB to it is ignored (GBATEK, mGBA), 16- and 32-bit stores
+reach it (mGBA drops 32-bit). Force reset keeps host time, as mGBA does
+(GBATEK resets to 2000-01-01). The readable port is patched into the
 bus's ROM copy so opcode fetches pay nothing. Save state v12 carries the block.
 Tests: `core/tests/rtc.rs` (5), `savestate.rs` `a_version_11_state_still_loads_with_a_set_up_rtc`,
 `a_hostile_rtc_state_is_rejected`. Boktai's solar sensor, gyro and rumble are
