@@ -78,19 +78,8 @@ fn gba_suite_memory() {
 
 // --- jsmolka/gba-tests, the same r12 protocol -----------------------------
 //
-// These are ignored, not deleted: they fail for a known and documented reason
-// rather than an unknown one, and a permanently red gate teaches people to
-// ignore it. Run them with `cargo test -- --ignored` to see where the work
-// stands.
-//
-// Every save suite fails at test 1, which only asks that uninitialised save
-// memory reads 0xFF. It reads 0x00 because **the save region is never reached**:
-// `MemoryBus` has no arm for 0x0E000000 and never calls the cartridge at all -
-// it keeps its own `rom` copy, while `Gba.cartridge` exists only for save-type
-// detection. The cartridge side is actually complete (`Cartridge::save_read`,
-// `save_write`, `save_data`, `load_save` in `core/src/cart/mod.rs`); what is
-// missing is the wiring between the bus and it, and the FFI to get the bytes
-// in and out. Drop the `#[ignore]` as each lands.
+// The save suites need the bus to reach the cartridge's save region at
+// 0x0E000000, wired since the save-data work (docs/save-data.md).
 
 #[test]
 fn gba_suite_save_sram() {

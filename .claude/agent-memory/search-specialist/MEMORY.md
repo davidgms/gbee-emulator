@@ -8,6 +8,7 @@ Newest last. Each line points at the file holding the detail.
 - **2026-09-03** - [SOUND3CNT_L (NR30) wave RAM banking: bit 5 is dimension, bit 6 is bank number, CPU always hits the *unselected* bank](2026-09-03-sound3cnt-l-nr30-wave-ram-banking-bit-5-is-dimension-bit-6-i.md)
 - **2026-09-04** - [Cross-emulator fast-forward/turbo survey: WebFetch tool craft, and where each source's pacing code actually lives](2026-09-04-cross-emulator-fast-forward-turbo-survey-webfetch-tool-craft.md)
 - **2026-09-10** - [OBJ-vs-OBJ overlap is priority-first (rule B), correcting my 2026-09-01 entry above](2026-09-10-obj-vs-obj-overlap-is-priority-first-rule-b-correcting-my-20.md)
+- **2026-10-27** - [Emulator bug research fetch craft: NBA issues are on Codeberg, issue-search pages list titles, CHANGES needs offset](2026-10-27-emulator-bug-research-fetch-craft.md)
 
 Durable facts about the project itself go to `.claude/memory.md` or
 `docs/` instead, so every agent and every human gets them; leave a line

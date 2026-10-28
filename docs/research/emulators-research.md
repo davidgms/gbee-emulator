@@ -1,8 +1,9 @@
 # Emulators research - conclusions (Phase 4.5)
 
+For the classes of accuracy bug that other emulators hit (and GBee should expect), see [`gba-bug-classes.md`](gba-bug-classes.md). This file covers frame pacing, audio and Android platform behaviour.
+
 Written 2026-10-02 from eleven per-emulator notes (mGBA, gpSP, NanoBoyAdvance, SkyEmu, melonDS, melonDS Android, Azahar, Dolphin, PPSSPP, RetroArch, Lemuroid). The notes live in each developer's `temp/emulators-research/` and are not committed; every link this summary depends on is quoted here. Claims
-marked **(verified)** were re-read in the source by the main session; the
-verification log is at the bottom of `ROADMAP.md`. Everything else is as the
+marked **(verified)** were re-read in the source by the main session. Everything else is as the
 research agents reported it, with the link in the emulator's notes.
 
 ## 1. The MIUI 50 Hz problem

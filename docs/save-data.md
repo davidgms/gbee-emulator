@@ -136,8 +136,9 @@ deciding whether that means "write now", "write in two seconds" or "write on
 
 ## Verified by
 
-`core/tests/saves.rs`, plus these ROMs from `jsmolka/gba-tests` driven through
-`core/tests/gba_suite.rs`:
+`core/tests/saves.rs`, `core/tests/state_restore.rs` and
+`core/tests/state_resume.rs`, plus these ROMs from `jsmolka/gba-tests` driven
+through `core/tests/gba_suite.rs`:
 
 | ROM | Status |
 |---|---|
@@ -145,52 +146,39 @@ deciding whether that means "write now", "write in two seconds" or "write on
 | `flash64.gba` | passes |
 | `flash128.gba` | passes |
 | `none.gba` | passes |
-| `bios.gba` | ignored - its first check reads the BIOS ROM, which HLE cannot reproduce |
+| `bios.gba` | passes since the bus answers BIOS reads from `MemoryBus::bios_latch` (#67) |
 
-ROMs are never committed. Fetch them into `temp/roms/`; the tests skip when
-they are absent.
+ROMs are never committed. Fetch them into `temp/roms/`. The ROM tests print
+"skipping" and **pass** when the file is absent, so on a fresh clone or in CI
+they are not a gate; `saves.rs` is.
 
-## Save state format v3
+## Save state format history
 
-v2 restored a machine that never existed. v3 fixes it:
-
-| Was | Now |
-|---|---|
-| Timers wrote the counter and restored it **as the reload**; control registers absent entirely, so every timer came back **disabled** - killing DMA sound and every cascade | Counter, reload, control, prescaler, tick counter and the enable/cascade/IRQ flags all round-trip |
-| DMA assigned the raw control word, leaving `timing`, `word_count` and the address modes stale. Sound DMA is `timing == 3`, so it was **dead after every restore** | Rebuilt through `Dma::restore_control`, which decodes without starting a transfer |
-| The entire `io_regs` file was absent - DISPCNT, scroll registers, everything | Serialised in full |
-| The cartridge battery save was absent, so a state did not roll the `.sav` back with it | Serialised alongside |
-| `restore` wrote into the live machine as it parsed, so a bad file left a **hybrid of two machines** while returning `Err` | Snapshots first and rolls back on failure, so a rejected load is a no-op |
-
-Splitting `Dma::decode_control` out of `write_control` also fixed a live bug:
-`word_count` was computed from `transfer_type` **before** that field was
-assigned from the new control word, so it used the previous transfer's width.
-
-The version check rejects older states outright rather than misreading them.
+The current format is **v11** (`SAVE_VERSION` in `core/src/savestate.rs`);
+v6 to v11 load, anything older is refused. Milestones: v3 made the round trip
+real (timers came back disabled, DMA-derived state stale, `io_regs` and the
+cart save absent, and a rejected restore left a hybrid of two machines - it
+now snapshots and rolls back); v4 added the APU; v8 the DMA latches (#65);
+v9 SIO (#68); v10 the ROM CRC-32; v11 the live between-step state (#94). The
+v10 and v11 paragraphs above describe what those two carry.
 
 ## Still missing
 
-- ~~**Android persistence.**~~ Done: `EmulationViewModel` in `android/` reads
-  `<romfile>.sav` next to the ROM before the first frame runs, and debounces
-  the flush off the core's dirty flag (2s after the last dirty read, plus an
-  unconditional flush on pause/stop/`onCleared`). Falls back to app-private
-  storage if the ROM-adjacent write fails. Unverified on a device - no game
-  has driven this path yet.
-- **Flash chip ID reads.** Command `0x90` sets a state but no read behaviour,
-  so a game probing the manufacturer/device ID gets flash contents instead.
-  Some games check this before writing and will refuse to save. The gba-suite
-  save ROMs pass without it, so it needs its own test.
-- ~~EEPROM is not EEPROM.~~ **Implemented 2026-08-28.** It is now the real
-  serial protocol at `0x0D000000`, driven bit by bit through DMA's halfword
-  path: `11` + 6 or 14 address bits + `0` to set a read address, 68 bits back
-  of which the first four are discarded, and `10` + address + 64 data bits +
-  `0` to write. Two traps worth knowing if you touch it: **both** commands end
-  with a stop bit that must be consumed, or it lands in the next command's
-  opcode and desynchronises the stream - which is exactly how the first version
-  failed. Address width comes from the detected size, and remains guessed at
-  ROM load rather than inferred from the game's first access, so a cart whose
-  real EEPROM size differs from our guess gets a file other emulators will not
-  read.
-- **APU state is still absent from the save state.** Everything else v2 was
-  missing is now in v3 (see below), but the audio channels are not, so sound
-  restarts from silence after a load rather than continuing mid-note.
+Done since this file was written, checked in code: Android persistence
+(battery saves live only in app storage, `filesDir/saves/<key>.sav`, since
+#78, with a one-time import of the old `.sav` beside the ROM - `RomFiles.kt`),
+Flash chip ID reads (`flash_reports_its_chip_id`), the EEPROM width taken from
+the DMA length and the game's save size rather than guessed
+(`the_eeprom_address_width_follows_the_dma_length`,
+`an_8kb_eeprom_on_a_small_cart_keeps_every_block`), and APU state in the save
+state (v4).
+
+Still open:
+
+- **No RTC.** There is no GPIO or S3511 clock at `0x080000C4`, so Pokemon
+  Ruby/Sapphire/Emerald report a dead battery and lose clock events.
+- **Flash byte-program overwrites** (`cart/mod.rs`, state 4). Real flash can
+  only clear bits, so a game that programs without erasing gets different
+  data. No Atmel page-write variant.
+- **Save-type detection has no override list.** A ROM with a stripped or
+  misleading library string gets `SaveType::None` and its saves are lost.

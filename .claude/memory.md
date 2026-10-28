@@ -13,39 +13,41 @@ here costs more than a missing one.
 
 ## Project Scope
 
-Cross-platform Game Boy Advance emulator with a pixel bee theme.
+Game Boy Advance emulator with a pixel bee theme, shipping on Android.
 
-- **`core/`** - Rust emulation core (~5.6k lines). ARM7TDMI interpreter, PPU,
+- **`core/`** - Rust emulation core (~11.7k lines). ARM7TDMI interpreter, PPU,
   APU, memory bus, DMA, timers, cartridge saves, save states, HLE BIOS.
-- **`android/`** - Kotlin + Jetpack Compose. Primary target.
-- **`ios/`** - Swift + SwiftUI. Secondary, and not yet buildable.
+- **`android/`** - Kotlin + Jetpack Compose. The only target being worked on.
+- **`ios/`** - Swift + SwiftUI. Out of scope until the app is live on Play
+  (`ROADMAP.md`, top), and not buildable.
 - Licence MIT. No ROMs or BIOS images in the repository, ever.
 
 ## Tech Stack
 
 - **Core**: Rust 2021, dependencies limited to `log` and `thiserror`
   (plus `jni` and `android_logger` under `cfg(target_os = "android")`).
-- **Android**: Kotlin, Jetpack Compose, minSdk 26, targetSdk 34, NDK 27,
-  ABIs `arm64-v8a` and `armeabi-v7a`.
-- **iOS**: Swift, SwiftUI.
+- **Android**: Kotlin, Jetpack Compose, minSdk 26, targetSdk 36, NDK 27,
+  ABIs `arm64-v8a` and `armeabi-v7a`. `android/app/build.gradle.kts` is the
+  source of truth for these numbers, not the README.
 - **Toolchain**: Docker image with the full Android SDK/NDK, or local
   `rustup` + `cargo-ndk`. Development happens on WSL2.
 
 ## Key Files
 
-- `core/src/lib.rs` - `Gba::run_frame`, the main emulation loop, DMA sound
-  routing and interrupt delivery.
+- `core/src/lib.rs` - `Gba::run_frame`/`step`, the main loop, DMA sound
+  routing, interrupt delivery, the halted path.
 - `core/src/cpu/mod.rs` - `Cpu::step`, PC advance, banked registers, IRQ entry.
 - `core/src/cpu/arm.rs` / `thumb.rs` - the two instruction decoders.
 - `core/src/ffi.rs` - the only boundary between core and frontends: C ABI plus
   JNI exports.
-- `core/src/io.rs` - I/O register constants and the interrupt handler state.
+- `core/src/io.rs` - I/O register constants, read rules, interrupt state.
 - `core/tests/` - the accuracy gate. See CLAUDE.md, Testing.
 - `android/.../engine/GbaEngine.kt` - Kotlin side of the JNI bridge.
 - `android/.../engine/AudioOutput.kt` - `AudioTrack` sink; the timing master.
 - `android/.../viewmodel/EmulationViewModel.kt` - the emulation loop driver.
-- `ROADMAP.md` - what is actually done and what is next. Trust it over the
-  feature checklists in `README.md`.
+- `ROADMAP.md` - what is actually done and what is next, and the owned list of
+  known accuracy gaps. Trust it over the feature checklists in `README.md`.
+- `docs/research/gba-bug-classes.md` - the accuracy audit by bug class.
 
 ## Hardware references
 
@@ -63,33 +65,41 @@ Answer hardware questions from these rather than from memory:
   (ported from NBA) and the HLE Div/ArcTan/ArcTan2 (shaped after mGBA's
   `bios.c`) were both rewritten for this reason before merge.
 
+**Fetching GBATEK**: the combined `gbatek.htm` truncates badly through
+WebFetch. Use the split pages, `https://problemkaputt.de/gbatek-<slug>.htm`
+(for example `gbatek-arm-cpu-exceptions.htm`, `gbatek-gba-timers.htm`), and
+find a slug with a `site:problemkaputt.de` search. The ARM TRM redirects to a
+JS-rendered page that cannot be fetched; GBATEK's *ARM CPU Exceptions*
+reproduces its exception-entry table.
+
 ## Discoveries
 
-### 2026-08-27 - The core's decoders were structurally broken, and nothing caught it
+### 2026-08-27/28 - The generated core was broken, and the decoders taught the rules
 
-**Context**: first test suite ever written for `core/`. Four fatal bugs
-surfaced within minutes, all of which had been in the repository for its whole
-history while `ROADMAP.md` marked the decoders complete.
+**Context**: the core arrived "complete" on 2026-08-25. The first hand-written
+test suite found four fatal decoder bugs in minutes (PC advanced by 8 so every
+second instruction was skipped; THUMB dispatch matched 3 bits against 4- and
+5-bit arms so most of THUMB was a NOP; ARM halfword transfers absent; MRS/MSR
+selected on bit 4 instead of 21). jsmolka's gba-suite then found eleven more
+(inverted `I`/`U` bits, dispatch ranges that excluded `SWPB`/`SMULL`/register
+shifts, missing `P` bit and `IB`/`DA`, empty list, base-in-list, user-bank `^`,
+`Rd == Rn` writeback, flags written on non-S ops, a memory map with no
+mirroring). Alongside: KEYINPUT read 0 (all ten buttons held) because
+`io_regs` is zero-filled and the register is active-low; ARM-mode `swi` passed
+the whole 24-bit comment where the BIOS reads bits 23-16 (`ldrb [lr,#-2]`), so
+every ARM-state BIOS call did nothing while THUMB worked; and LZ77/RL looped
+forever because they never read the header's size (bits 8-31).
 
-1. **PC advanced by 8 per ARM instruction (4 per THUMB).** `Cpu::step` set
-   `R15 = pc + 8` to satisfy the "R15 reads as PC+8" rule and never walked it
-   back, so **every second instruction was skipped**. Fixed with a `branched`
-   flag set from `set_reg(15, ...)`.
-2. **THUMB dispatch matched 3 bits against 4- and 5-bit arms.**
-   `match bits15_13` with arms like `0b1001`, `0b1101`, `0b11110`, which can
-   never match a 3-bit value. ALU ops, hi-register/BX, PC-relative load,
-   register-offset load/store, push/pop, STMIA/LDMIA, conditional branches and
-   BL all silently became NOPs. Fixed by re-keying to `bits15_12`.
-3. **ARM halfword transfers were absent.** `LDRH`/`STRH`/`LDRSB`/`LDRSH` hit no
-   dispatch arm and fell through to NOP.
-4. **MRS/MSR were selected on bit 4 instead of bit 21**, so every `MSR` ran as
-   `MRS` and nothing could write CPSR.
+**Application**:
 
-**Application**: Rust will not warn about an unreachable integer match arm, so
-a dispatch table is exactly the kind of code that rots silently. When touching
-either decoder, add the encoding to `core/tests/cpu.rs` first. Treat the
-completion claims in `ROADMAP.md` and `README.md` as unverified until a test
-covers them.
+- Rust does not warn about an unreachable integer match arm, so a dispatch
+  table rots silently. Add the encoding to `core/tests/cpu.rs` before
+  touching a decoder, and run `cargo test --release --test gba_suite`.
+- **A round-trip test that does not check the address proves nothing.**
+  `arm_ldr_str_word` passed while store and load used the same wrong address.
+- Treat any `unreachable!()` in a decode path as a latent panic.
+- Completion claims in `ROADMAP.md` and `README.md` are unverified until a
+  test covers them.
 
 ### 2026-08-27 - Ordering trap in the ARM dispatch chain
 
@@ -99,103 +109,6 @@ pre-indexed, down-counting `STRH` carries the same bits `[24:23] = 10` and
 routes stores into the PSR path. The dispatch chain in `core/src/cpu/arm.rs`
 is order-dependent throughout; adding an arm means checking what already
 claims that bit pattern.
-
-### 2026-08-27 - KEYINPUT defaults to "every button held"
-
-`KEYINPUT` (`core/src/io.rs:108`) is a declared constant referenced nowhere,
-and `io_regs` is zero-filled. The register is active-low, so a read returns
-`0x0000` = all ten buttons pressed, permanently. Any game that polls input
-misbehaves from the first frame. Initialising it to `0x03FF` is half the fix;
-the other half is an FFI entry point, since no input path from the frontends
-to the core exists at all.
-
-### 2026-08-27 - Fetching GBATEK: use the per-section pages, not the monolith
-
-The combined `gbatek.htm` truncates badly through WebFetch's markdown
-conversion. Use the split pages instead, pattern
-`https://problemkaputt.de/gbatek-<section-slug>.htm` - for example
-`gbatek-arm-cpu-register-set.htm`, `gbatek-arm-cpu-exceptions.htm`,
-`gbatek-gba-interrupt-control.htm`, `gbatek-gba-timers.htm`,
-`gbatek-gba-keypad-input.htm`. Find a slug with a `site:problemkaputt.de`
-search rather than guessing anchors on the combined page.
-
-The ARM7TDMI TRM at `developer.arm.com/documentation/ddi0029*` redirects to a
-JS-rendered page that cannot be fetched as static text. GBATEK's *ARM CPU
-Exceptions* page reproduces the same exception-entry table and is fetchable,
-so it is the practical primary source even though the TRM outranks it.
-
-### 2026-08-28 - `libgbee_core.so` was never actually committed
-
-CLAUDE.md's own architecture section and `ROADMAP.md` item 0.5 both asserted
-the jniLibs `.so` files were "committed" and merely stale. `git ls-files
-android/app/src/main/jniLibs` returns nothing: `.gitignore`'s `*.so` rule
-(under the "Build artifacts" section) matches them, and they were never
-force-added. They exist only as local build output on whatever machine last
-ran `./build-mobile.sh` or `./build.sh android`. A fresh clone has empty (in
-fact absent - git does not track empty directories) `arm64-v8a`/`armeabi-v7a`
-folders, so a Gradle build from a clean checkout packages an APK with no
-native library at all, and it `UnsatisfiedLinkError`s on the first JNI call -
-not "runs the old bugs" as the stale wording implied. `.github/workflows/ci.yml`
-(added 2026-08-28) now builds both ABIs with `cargo-ndk` on every push and
-uploads them as artifacts; nothing needs to change about `.gitignore`, since
-there was never anything to remove from git in the first place.
-
-### 2026-08-28 - ARM-mode `swi` took the function number from the wrong bits
-
-`core/src/cpu/arm.rs` passed the whole 24-bit comment field to `Cpu::swi`, so
-`bios::handle_swi` matched on `0x0C0000` and fell through to `_ => false` for
-every ARM-mode BIOS call. The real BIOS handler does `ldrb r?,[lr,#-2]`, which
-for an ARM opcode is bits 23-16 and for a THUMB opcode is the low byte - the
-comment field width differs but the byte the BIOS reads does not. GBATEK, *ARM
-CPU Exceptions*, says the same thing from the other direction: "you could use
-only the most significant 8bits of the 24bit ARM comment". THUMB
-(`thumb.rs:393`) was already correct, which is why nothing noticed: every game
-that calls BIOS functions from THUMB worked and every ARM-state call silently
-did nothing. Covered now by `arm_swi_takes_the_function_number_from_bits_23_16`
-in `core/tests/bios.rs`.
-
-The same pass found `lz77_decompress` and `rl_decompress` reading the header's
-decompressed size into `_decompressed_size` and then never using it: both had a
-bare `loop` with no exit, so a single `SWI 0x11` or `0x14` overwrote memory
-until it hit an unmapped address. The size lives in bits 8-31 of the header,
-not bits 0-23 - bits 0-3 are the unit size and 4-7 the type.
-
-### 2026-08-27 - An agent whose `tools:` list omits Edit cannot satisfy the Memory Protocol
-
-`search-specialist` and `accessibility-tester` shipped with read-only tool
-lists (`Read, Grep, Glob, ...`), so the memory check nudged them on
-every run for a write they were structurally incapable of making. Both now
-carry `Edit`. (Superseded 2026-09-14: `memory: project` enables Read, Write and
-Edit for that agent automatically, so this no longer bites.) When registering an
-agent expected to keep memory,
-check that its frontmatter grants `Edit` or `Write` - the hook and the tool
-list have to agree or the agent loops.
-
-### 2026-08-28 - gba-suite found eleven bugs the hand-written tests could not
-
-**Context**: `core/tests/gba_suite.rs` runs jsmolka's ROMs from `temp/roms/`.
-All three (`arm`, `thumb`, `memory`) pass as of 2026-08-28. Getting there took
-eleven fixes beyond the four the first hand-written suite caught.
-
-The pattern worth remembering: **every one was a decode or dispatch bug that
-hand-written tests missed because the test and the code shared the same wrong
-assumption.** The worst example was `arm_ldr_str_word`, which asserted a
-store/load round trip and passed while both halves used the wrong address -
-an inverted offset-mode flag sent them to the same wrong place. A test that
-checks a round trip without checking the address proves nothing.
-
-Categories found: inverted flag bits (`I` in single transfer, `U` in multiply
-long), dispatch ranges that excluded valid encodings (`SWPB`, `SMULL`,
-register-specified shifts), missing addressing modes (the `P` bit, `IB`/`DA`
-block starts), missing special cases (empty register list, base-in-list,
-user-bank `^` transfers, `Rd == Rn` writeback), unconditional flag writes on
-non-S operations, and a memory map with no mirroring at all.
-
-**Application**: when touching either decoder or the bus, run
-`cargo test --release --test gba_suite` before claiming anything works. Assert
-on addresses and side effects, not just on returned values. And treat any
-`unreachable!()` in a decode path as a latent panic - THUMB Format 2 sat there
-for the project's whole history.
 
 ### 2026-08-28 - write16 and write32 decompose into byte writes
 
@@ -207,1318 +120,676 @@ The fix was a private `store8` that the wider writes use, with the public
 `write8` layering the video rules on top. If you add another size-dependent
 rule to the bus, check which of the two paths it belongs on.
 
-### 2026-08-28 - The cartridge save memory is complete and completely unreachable
+### 2026-08-28 - Grep for a caller before believing a feature is done
 
-`Cartridge::save_read`, `save_write`, `save_data` and `load_save`
-(`core/src/cart/mod.rs:132,151,218,230`) have **zero callers anywhere in the
-repository**. `MemoryBus` has no `Cartridge` field at all and keeps its own
-second copy of the ROM, filled by `Gba::load_rom` (`core/src/lib.rs:51`) - so a
-32 MB cart is resident twice. There is no bus arm for `0x0E000000`, so every
-in-game save write is silently discarded and every read returns 0. The Flash
-command state machine at `cart/mod.rs:161-207` has never executed a single
-transition.
+The cart's save memory (`Cartridge::save_read`/`save_write`/`save_data`/
+`load_save`) was complete and had **zero callers**: `MemoryBus` had no
+`Cartridge` and no arm for `0x0E000000`, so every in-game save was discarded.
+The same shape repeated six more times in the next week - DMA register setters
+(2026-08-30), timer setters, the empty `on_timer_overflow` stub,
+`apply_alpha_blend` (2026-08-31), rewind with no FFI, and the jniLibs `.so`
+that docs called "committed" but `.gitignore`'s `*.so` rule had always
+excluded. A number repeated from prose has the same failure: README's minSdk
+24 was copied into CLAUDE.md, this file and two personas while
+`build.gradle.kts` said 26.
 
-`ROADMAP.md` claimed "SRAM/Flash/EEPROM save" and "emulated but never written
-to disk". Both were wrong in the same direction. That is the fifth time a
-completion claim in this repo has turned out to describe code that exists but
-is never reached - the same shape as the THUMB dispatch and the ARM SWI
-comment field.
-
-**Application**: when a feature is listed as done, grep for a *caller* before
-believing it. `pub fn` existing proves nothing.
-
-### 2026-08-28 - Save state v3 fixed the round-trip bugs v2 had
-
-Superseded: the v2 bugs this entry used to describe (swapped timer
-counter/reload, stale DMA-derived state, `io_regs`/APU/cart-save missing
-entirely, destructive restore on a truncated file) are fixed in
-`core/src/savestate.rs` v3 - see `ROADMAP.md` and `docs/save-data.md`. The
-JNI/C-ABI surface also changed shape at the same time: the opaque
-create/load/destroy handle triplet is gone, replaced by a byte-based
-`state_read`/`state_write` (C ABI) and `nativeStateRead`/`nativeStateWrite`
-(JNI) pair mirroring the battery-save shape. A `false`/`-1` result from a
-write still means the session is unreliable (restore mutates the live
-machine as it parses), so callers must stop rather than continue on a
-rejected load - that part did not change.
+**Application**: when a feature is listed as done, grep for a *caller*, not a
+`pub fn`. Treat a function whose body is a comment as a missing feature, not a
+simplification - `on_timer_overflow` documented the hardware behaviour it did
+not implement. When a layer boundary exists (core/FFI/frontend), check both
+sides of it. Read a number from the file that defines it.
 
 ### 2026-08-28 - `cargo check --target aarch64-linux-android` compiles the JNI block
 
 The JNI exports in `core/src/ffi.rs` sit behind `#[cfg(target_os = "android")]`,
 so a normal `cargo build`/`cargo test` never type-checks them - broken JNI code
-passes the whole local gate and only fails in CI or on a device. The Rust
-Android targets are already installed here, and `cargo check --target
-aarch64-linux-android` compiles that block **without needing the NDK** (a full
-build would need the linker; a check does not).
-
-It caught two real errors on its first use: `JNIEnv` must be taken as `mut env`
-for `new_byte_array` and `get_array_elements`. Run it after touching `ffi.rs`.
-See `docs/save-data.md` for the save FFI it was catching errors in.
-
-### 2026-08-28 - `android/app/src/main/cpp/jni_bridge.c` is dead code, not a second implementation
-
-Grepping the Android tree for JNI method names to check for callers of a
-removed FFI function turns up `android/app/src/main/cpp/jni_bridge.c`, a
-hand-written C file that redeclares the `gbee_*` C ABI and re-implements
-`Java_com_gbee_emulator_engine_GbaEngine_*`. It looks like an alternative to
-the JNI exports `core/src/ffi.rs` already provides directly (the `jni` crate
-implements the same `Java_com_gbee_emulator_engine_GbaEngine_*` symbols
-itself). It is not built: `android/app/build.gradle.kts` has no
-`externalNativeBuild`/CMake block, so nothing ever compiles this file into
-the APK. It is also stale proof of that - it still calls the removed
-`gbee_save_state_create`/`gbee_load_state`/
-`gbee_save_state_destroy` and has no `nativeSetKeys`, save, or
-save-state-bytes exports at all, meaning nobody has touched it through two
-rounds of FFI changes. Do not treat it as something to keep in sync; it is
-either dead weight worth deleting or an intentional dual-build path nobody
-has documented. `mobile-developer` owns the Gradle/NDK wiring decision.
-
-### 2026-08-28 - minSdk is 26, not 24
-
-`android/app/build.gradle.kts:13` sets `minSdk = 26`. `README.md` said 24, and
-that number was copied into `CLAUDE.md`, this file and two agent personas
-without anyone checking the build file - so agents were told to guard API 26+
-calls that need no guard. All corrected on 2026-08-28.
-
-Same failure shape as the "committed .so" and "cart saves are emulated"
-claims: **a number repeated from prose rather than read from the file that
-defines it.** For Android facts, `build.gradle.kts` is the source of truth,
-not the README.
+passes the whole local gate and only fails in CI or on a device. `cargo check
+--target aarch64-linux-android` compiles that block **without needing the
+NDK**. It caught two real errors on its first use (`JNIEnv` must be `mut env`
+for `new_byte_array` and `get_array_elements`). Run it after touching `ffi.rs`.
 
 ### 2026-08-28 - Mode 0 never read tile data: a VRAM offset used as an address
 
-`Ppu::get_bg_pixel` returned `char_base = ((cnt >> 2) & 3) * 0x4000` - a VRAM
-*offset* - and the caller passed it straight to `bus.read8()`. Every tile-data
-read therefore landed around `0x4000` (unmapped) instead of `0x06004000`, so
-every pixel decoded to colour 0 and was skipped. The screen-entry read in the
-same function *did* add `0x0600_0000`, which is what made it hard to spot.
-
-It was invisible because `render_scanline` pre-filled each line with **white**
-rather than the backdrop, so a background that drew nothing looked like a
-deliberately bright screen. Two bugs hiding each other.
-
-Also fixed while there: screen-entry bits 10/11 (horizontal and vertical tile
-flip) were ignored, and bits 12-15 (the 4bpp palette bank) were computed as a
-`_palette_base` that was never used.
+`Ppu::get_bg_pixel` passed `char_base` - a VRAM *offset* - straight to
+`bus.read8()`, so every tile read landed around `0x4000` instead of
+`0x06004000` and decoded to colour 0. It was invisible because
+`render_scanline` pre-filled each line with **white** rather than the
+backdrop. Two bugs hiding each other. Tile flip bits and the 4bpp palette bank
+were ignored too.
 
 **Application**: in `ppu/`, be explicit about whether a value is a VRAM offset
-or a bus address - the two differ by `0x06000000` and only one of them faults
-visibly. And never clear a scanline to a colour that could be mistaken for
-real output; clear to the backdrop or to something obviously wrong.
+or a bus address - the two differ by `0x06000000` and only one faults visibly.
+Never clear a scanline to a colour that could be mistaken for real output.
 
-### 2026-08-28 - The APU register map is off by one byte, so no channel starts
+### 2026-08-28 - The APU register map was off by one byte, so no channel started
 
-Found while writing a save-state test that needed the APU to make a sound and
-could not get one out of it.
-
-`Apu::write_sound1_reg` decodes `SOUND1CNT_H` as if the whole 16-bit register
-were in the low byte: `0x62` sets duty (correct), and also envelope volume,
-direction and period, which GBATEK puts in the high byte `0x63`. `0x63` is then
-decoded as a length counter, which actually lives in `0x62` bits 5-0. `0x64` is
-treated as the high byte of `SOUND1CNT_X` and shifted left 8, when it is the
-low byte - and **`0x65` has no handler**, which is where the trigger bit sits.
-No PSG channel can be started. The other three channels follow the same shape.
-
-`Gba::apu_sound_write` compounds it by routing only a subset of the offsets the
-bus captures - roughly half the sound registers, plus all of wave RAM, never
-reach the APU.
-
-Two adjacent bugs already fixed: `SOUNDCNT_X` (0x84, the PSG/FIFO master
-enable, bit 7) was not routed at all, and `sound_on` was derived from
-SOUNDCNT_H bit 15 which GBATEK defines as "DMA Sound B Reset FIFO".
-
-**Fixed on 2026-08-28** by decoding at 16-bit register granularity instead of
-per byte, and by folding every captured byte offset onto its containing
-register rather than matching a hand-listed subset. `core/tests/saves.rs` now
-has the first tests in this project's history that get audio out of the APU.
+`write_sound1_reg` decoded `SOUND1CNT_H` as if the whole register were in the
+low byte, treated `0x64` as a high byte, and had **no handler for `0x65`**,
+where the trigger bit sits. `Gba::apu_sound_write` also routed only about half
+the sound registers. `SOUNDCNT_X` (master enable) was not routed at all, and
+`sound_on` was read from SOUNDCNT_H bit 15, which is "DMA Sound B Reset FIFO".
+Fixed by decoding at 16-bit register granularity and folding every captured
+byte onto its containing register.
 
 **Application**: byte-level register decoding is where this class of bug
-breeds - a 16-bit layout flattened into the low byte looks plausible and is
-wrong in a way no test catches until you ask for output. Decode whole
-registers. And note that downstream audio work (the `AudioTrack` path, buffer
-sizing, latency) has still never been exercised by real game audio.
+breeds. Decode whole registers, and ask for output - a 16-bit layout flattened
+into the low byte looks plausible until something has to sound.
 
 ### 2026-08-30 - A press shorter than one frame used to be dropped
 
-`EmulationViewModel` samples `keyState` once per frame and hands it to
-`engine.setKeys`. A synthetic `adb input tap` presses for **3 ms**, so the
-loop never observed it - the log showed `setKey pressed=true` and
-`pressed=false` 3 ms apart with no `loop sees` in between. A human touch lasts
-50-200 ms so real play was unaffected, but the design silently lost any press
-shorter than ~16 ms.
-
-Fixed with a `transientPresses` AtomicInteger that latches every press and is
-drained by the loop, so a press reaches the core for at least one frame
-regardless of how brief it was.
+`EmulationViewModel` samples `keyState` once per frame. A synthetic `adb input
+tap` presses for 3 ms, so the loop never saw it. Fixed with a
+`transientPresses` AtomicInteger that latches every press until the loop
+drains it.
 
 **Application**: when a consumer polls state on a fixed cadence, decide
-explicitly what happens to events shorter than the period. Polling `keyState`
-looked obviously correct and was not.
+explicitly what happens to events shorter than the period.
 
 ### 2026-08-30 - Debugging on device: trust the log over the screen
 
-Chasing an input bug that did not exist cost several rounds because the
-verification was a single sampled pixel of an emulated frame, and the sample
-point kept landing in the letterbox. A one-line `log::warn!` inside the JNI
-function settled it immediately and unambiguously: `nativeSetKeys keys=0x8 ->
-KEYINPUT=0x03F7`, 72 frames running.
+A single sampled pixel kept landing in the letterbox; one `log::warn!` in the
+JNI function settled it (`nativeSetKeys keys=0x8 -> KEYINPUT=0x03F7`). Two
+traps: a hand-written test ROM is itself unverified code (**halfword loads
+carry only an 8-bit immediate offset**, so `[r0, #0x130]` silently encoded as
+`[r0, #0x10]`), and `android_logger` is capped at `LevelFilter::Warn`, so
+`log::info!`/`debug!` from Rust never reach logcat. MIUI's `ACDB-LOADER ...
+set parameters failed` lines are present for any app, not ours.
 
-Two traps also worth remembering. A hand-written test ROM is itself unverified
-code: mine read `[r0, #0x130]` for KEYINPUT, but **halfword loads carry only an
-8-bit immediate offset**, so it silently encoded as `[r0, #0x10]` and read a
-write-only register. And `android_logger` is capped at `LevelFilter::Warn` in
-this project, so `log::info!`/`debug!` from Rust never appear in logcat.
+### 2026-08-30 - DMA was never wired to the bus
 
-### 2026-08-30 - Audio reaches the device, but not the low-latency path
+The bus stored DMA registers into `io_regs` and `Dma::channels[]` never heard
+about them; Yggdra hung polling DMA3CNT_H bit 15. `MemoryBus::store8` now
+queues the channel whose DMAxCNT_H high byte was written (`dma_writes`), and
+`Gba::step` drains it through `apply_dma_writes`. The bus cannot apply it
+itself: `write_control` runs an immediate transfer inline and needs `&mut
+MemoryBus`, the borrow the store already holds. Same shape as `sound_writes`
+and `timer_writes`.
 
-A tone ROM (`temp/roms/tone.gba`, rebuilt by `core/tests/tonerom.rs`'s comment
-block) drives PSG channel 1, and `dumpsys audio` reports our track as
-`state:started` on a real device. That closes the last completely unverified
-subsystem.
+Making DMA live exposed three bugs in code that had never run: source and
+destination address-control fields read backwards (bits 5-6 are **dest**),
+"0 means maximum length" truncated back to 0 by `as u16`, and repeat reloading
+the *source*, which flattens an HDMA table. Still not implemented: video
+capture DMA (timing 3) is an empty loop in `Dma::on_vcounter`.
 
-But logcat carries `createTrack_l(0): AUDIO_OUTPUT_FLAG_FAST denied by server`.
-The track is created correctly - `sampleRate 17403, format 0x5 (PCM_FLOAT),
-channelMask 0x1, frameCount 1400` - and the rate is the problem: Android grants
-the fast path only when the track's rate matches the device's native output
-rate, essentially always 48000 Hz. Ours is `16777216 / 964 = 17403`, so the
-track is resampled through the normal mixer and
-`PERFORMANCE_MODE_LOW_LATENCY` has no effect.
+### 2026-08-30 - Yggdra Union boots: four bugs gba-suite does not cover
 
-**Application**: the roadmap's "input latency under 45 ms" target depends on
-this, not on the input path. Resampling to 48000 in the core needs fractional
-cycle accumulation, since 16777216/48000 is not an integer.
+1. **THUMB `B label` never sign-extended its 11-bit offset** (`as i16` of
+   `& 0x7FF` is always positive), so every backward branch went 0x1000 up.
+   jsmolka's `thumb.gba` passes with the bug present.
+2. **The PPU rebuilt DISPSTAT every tick from cached enable bits**, erasing a
+   mid-scanline write; bit 2 was hard-wired to VBlank and the VCount IRQ never
+   fired. Bits 3-15 are the game's and are now preserved.
+3. **A halted step advanced a whole scanline**, stepping over HBlank: one IRQ
+   a frame instead of 228. `Ppu::cycles_to_next_event` bounds the step.
+4. **The HLE BIOS IRQ handler acknowledged IF** before calling the game's
+   handler. The real one only saves r0-r3/r12/lr, jumps to `[0x03007FFC]` and
+   returns; IF and the IntrWait flags at `0x03007FF8` are the game's job. HLE
+   `IntrWait` now polls `[0x03007FF8]` and re-executes its own SWI.
 
-Also worth knowing: the `ACDB-LOADER ... set parameters failed` errors in
-logcat are MIUI's own audio calibration, present for any app, not ours.
-
-### 2026-08-30 - DMA was never wired to the bus: the sixth "complete but unreachable" feature
-
-`Dma::write_sad`/`write_dad`/`write_count`/`write_control` (`core/src/dma.rs`)
-had **no caller outside `dma.rs` and `core/tests/interrupts.rs`** for the
-project's whole history. The bus stored DMA register values into `io_regs` and
-`Dma::channels[]` never learned about them, so no game-initiated transfer ever
-ran. Yggdra Union hung at `0x08093030` polling DMA3CNT_H bit 15 for a
-completion that could not happen.
-
-Fixed on 2026-08-30. `MemoryBus::store8` records the channel whose DMAxCNT_H
-high byte was written into a private `dma_writes` queue, and `Gba::step` drains
-it through `Gba::apply_dma_writes`, which reads SAD/DAD/CNT_L back out of
-`io_regs` and calls the existing setters. The bus cannot apply the write itself:
-`write_control` runs an immediate transfer inline and needs `&mut MemoryBus`,
-the borrow the store already holds. Same shape as the `sound_writes` queue.
-
-Making DMA live exposed three more bugs in code that had simply never executed:
-`decode_control` read the source and destination address-control fields
-backwards (GBATEK: bits 5-6 are **dest**, 7-8 are **source**); `write_count`
-truncated the "0 means maximum length" expansion back to 0 with an `as u16`, so
-every maximum-length transfer was a no-op; and `do_transfer` reloaded the
-*source* on repeat, which flattens a per-scanline HDMA table to one value.
-HBlank DMA is now also gated to visible scanlines in `ppu/mod.rs`, and DMA
-sound routes by destination register rather than assuming DMA1 feeds FIFO A.
-
-Covered by `core/tests/dma.rs` (5 cases, all failing before the change).
-
-**Application**: that is now six times. The rule stands and should be applied
-before touching anything the roadmap calls done - grep for a *caller*, not for
-a `pub fn`. Still unaudited by that standard: video-capture DMA (timing 3 on
-DMA3) is a `TODO` in `Dma::on_vcounter` and does nothing.
-
-### 2026-08-30 - Yggdra Union boots: four bugs between the DMA fix and the title screen
-
-Superseded the earlier "derails in its task switcher" note - that derail was a
-symptom of the first bug below, not a task-switcher problem.
-
-The four, in the order they were found and each with a test that fails without
-the fix:
-
-1. **THUMB Format 18 (`B label`) never sign-extended its 11-bit offset.**
-   `core/src/cpu/thumb.rs` widened `instruction & 0x7FF` through `as i16`,
-   which is always positive, so **every backward unconditional branch landed
-   0x1000 above the branch instead of below it**. Yggdra's `__divsi3`
-   normalisation loop fell out of its own function into the C++ throw path,
-   which then hit `SWI 0xAB` (ARM semihosting `SYS_EXIT`) forever. Fixing it
-   also un-blacked `waimanu`, `jumpingbarnabe` and `powerpig`, which had all
-   rendered nothing since the project started. `jsmolka/gba-tests`' `thumb.gba`
-   passes with the bug present - the suite does not cover it.
-
-2. **The PPU rebuilt DISPSTAT every tick from cached enable bits** refreshed
-   only once per scanline, so a DISPSTAT write made mid-scanline was erased a
-   few cycles later. Bit 2 was also hard-wired to the VBlank range instead of
-   being the VCounter match against bits 8-15, and the VCounter IRQ was never
-   raised. Bits 3-15 are the game's and are now read back and preserved on
-   every tick.
-
-3. **A halted step advanced a whole scanline at once**, stepping straight over
-   HBlank, so a game halted with the HBlank IRQ enabled - most of every frame -
-   got one interrupt per frame instead of 228. `Ppu::cycles_to_next_event`
-   now bounds the step.
-
-4. **The synthetic BIOS IRQ handler acknowledged IF before calling the game's
-   handler.** The real BIOS handler does nothing but save r0-r3/r12/lr, jump to
-   `[0x03007FFC]` and return - it does *not* touch IF and does *not* update the
-   IntrWait flags at `0x03007FF8`; both are the game handler's job. Yggdra's
-   IWRAM dispatcher branches on `IE & IF`, read zero every time, fell through
-   its whole chain and called the wrong handler for every interrupt, so its
-   VBlank work - the only place DISPCNT is written - never ran. This was the
-   last thing between a black screen and the title screen.
-
-Related: HLE `IntrWait` now polls `[0x03007FF8]` and re-executes its own SWI
-until the wanted interrupt arrives, instead of testing IF once. IF is already
-cleared by the time the game's handler returns, so the old version let the
-first interrupt of any kind satisfy a `VBlankIntrWait`.
-
-**Application**: two of these four are cases where *our* HLE was doing the
-game's work for it. When an HLE stub is "helpful", check GBATEK for what the
-real BIOS actually does - a game that implements the hardware contract itself
-is broken by a stub that implements it too.
+**Application**: two of four were our HLE doing the game's work for it. When
+an HLE stub is "helpful", check GBATEK for what the real BIOS does.
 
 ### 2026-08-30 - A reference emulator is worth more than any amount of tracing
 
-Three of the four Yggdra bugs above came out of hand-tracing our own execution,
-and each took hours. The fourth - the one that actually mattered - took about
-ten minutes once mGBA was available to compare against: a write watchpoint on
-DISPCNT showed which function writes it, a breakpoint chain showed who calls
-that function, and `dis/a 0x03000000` showed the game's own IRQ dispatcher
-reading `IE & IF`.
-
-`mgba-sdl` is installable **without root**: `apt-get download` the package and
-its dependency closure, `dpkg-deb -x` each into one tree, and run it with
-`LD_LIBRARY_PATH` pointing at that tree. `temp/mgba/run.sh` does this and
-survives reboots because it lives in the project. Headless:
+Three of the four Yggdra bugs took hours of hand-tracing; the fourth took ten
+minutes in mGBA (a write watchpoint on DISPCNT, then the caller chain, then
+`dis/a 0x03000000`). `mgba-sdl` installs **without root**: `apt-get download`
+the package and its dependencies, `dpkg-deb -x` into one tree, run with
+`LD_LIBRARY_PATH`. `temp/mgba/run.sh` does this. Headless:
 `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy temp/mgba/run.sh -d <rom>`, then
-feed the CLI debugger on stdin - `watch/w <addr>`, `b <addr>`, `c`, `i`,
-`dis/t`, `dis/a`, `trace N`.
+feed the CLI debugger on stdin (`watch/w`, `b`, `c`, `i`, `dis/t`, `dis/a`,
+`trace N`).
 
-**Application**: reach for it *first* on "game X does not boot", before writing
-a single trace probe. Note mGBA boots through its own BIOS HLE from
-`0x00000350`, so instruction counts and early PCs do not line up with ours -
-compare behaviour at named addresses, not step numbers.
+**Application**: reach for it *first* on "game X does not boot". mGBA boots
+through its own BIOS HLE from `0x00000350`, so compare behaviour at named
+addresses, not step numbers.
 
+### 2026-08-31 - Timers unwired, FIFO stub, blend stub: the thump
 
-### 2026-08-31 - The timers were never wired either, and that is what made the sound a thump
+Yggdra's "tum tum" audio and grey bar were three faults:
 
-Device testing of the newly-booting Yggdra Union turned up "the screen is
-really bugged and the audio keeps doing a tum tum infinitely". Three separate
-faults, all found on the host with `mgba` as the reference:
+1. **Timer setters had no caller**, so no game timer ran: no timer IRQ, no DMA
+   sound. Fixed with a `timer_writes` queue latched on each register's high
+   byte. `TMxCNT_L` now reads the live counter.
+2. **`Apu::on_timer_overflow` was empty** and the mixer popped the FIFOs once
+   per output sample, so sound played at our rate and the source ran off the
+   game's buffer into IWRAM - a burst of garbage every six frames. Now a timer
+   overflow pops one byte into a latch, the mixer holds the latch, the DMA tops
+   up at half empty. `overflow_flags` is a count, since one tick can span
+   several overflows. DMA sound volumes are SOUNDCNT_**H** bits 2-3, and each
+   FIFO picks its own timer (H bit 10 for A, 14 for B).
+3. **`apply_alpha_blend` was empty**, and effects were gated on `bldcnt & 0x20`
+   (the *backdrop* 1st-target bit). Mode 0 now composites the top two layers
+   per pixel.
 
-1. **`Timer::set_control` and `set_reload` had no caller outside the tests** -
-   the seventh instance of this repository's standing pattern. The bus stored
-   `TMxCNT` into `io_regs` and the timer unit never heard about it, so no timer
-   a game started ever ran: no timer interrupt, and no DMA sound, which is
-   driven entirely by timer overflows. Fixed with a `timer_writes` queue on the
-   bus, the same shape as `dma_writes` and `sound_writes`, latched on the high
-   byte of each register. `TMxCNT_L` also now reads back the live counter
-   rather than the reload the game wrote there.
+Also: `Gba::step`'s halted branch skipped FIFO refill, timer overflows, queued
+sound writes and DMA application. A game is halted most of every frame, so
+that block is now a shared `post_tick` run on both paths.
 
-2. **`Apu::on_timer_overflow` was an empty stub** and the mixer popped the
-   FIFOs itself, once per output sample. Sound therefore played at our output
-   rate rather than the rate the game asked for, and drained far faster than
-   the DMA refilled it. With the source pointer running off the end of the
-   game's mix buffer into unrelated IWRAM, the result was a burst of garbage
-   every six frames - the thump. DMA sound is now: timer overflow pops one byte
-   into a latch, the mixer holds that latch, the DMA tops the FIFO up at half
-   empty. `overflow_flags` became a count rather than a bool, because one tick
-   can span several overflows at a short reload.
-   Also fixed while there: the DMA sound volumes are SOUNDCNT_**H** bits 2 and
-   3, not SOUNDCNT_L bits 12 and 13 (those are PSG channel enables), and each
-   FIFO picks its own timer (H bit 10 for A, bit 14 for B).
+### 2026-08-31 - Sprites had never rendered correctly
 
-3. **`Ppu::apply_alpha_blend` was an empty stub**, and the whole colour-effect
-   path was gated on `bldcnt & 0x20` - which selects the *backdrop* as a first
-   target, not whether an effect runs. Yggdra's title screen alpha-blends a
-   band across the artwork; we drew it flat opaque, which is the grey bar the
-   user saw. Mode 0 now composites the top two layers per pixel and applies the
-   effect there, because blending cannot be done after the fact from a single
-   frame buffer. The other modes still use the old scanline-wide
-   approximation.
+Four faults in `render_obj_scanline`: OBJ tiles read from `0x06000000`
+(they live at `0x06010000`, `0x06014000` in bitmap modes), so every sprite was
+textured with BG tiles; the depth bit read from attr0 bit 7 (part of Y) instead
+of bit 13; 8bpp tiles stepped by 64 instead of two 32-byte units (2D mapping is
+a fixed 32-unit grid); and X/Y sign-extended when they are unsigned and wrap.
+Flips were missing and OAM order was backwards. The affine path added the OAM
+base twice and read its matrix from the save chip.
 
-Separately, `Gba::step`'s halted branch skipped the entire post-instruction
-block - FIFO refill, timer overflows, queued sound-register writes, DMA
-register application. A game is halted for most of every frame, so all of it
-has to run there too; it is now a shared `post_tick`.
+**Application**: gba-suite, three homebrew ROMs and 40,000 frames of Yggdra's
+attract loop were all background-only. "The screens I checked render
+correctly" is not evidence that a feature works; reproduce the sequence the
+report names. Method: render with each of BG0-3 and OBJ forced off in DISPCNT
+(re-forced every step, since games rewrite it in VBlank) and diff the frames.
 
-**Application**: the "grep for a caller, not a `pub fn`" rule has now paid out
-seven times. Two of the three faults above were *stubs with a plausible name
-and a comment saying what they would do* - `on_timer_overflow` even documented
-the hardware behaviour it did not implement. Treat a function whose body is a
-comment as a missing feature, not a simplification, and check the callers of
-anything the roadmap calls done.
+### 2026-08-31 - Homebrew test ROMs, and the VRAM decompressors they caught
 
-### 2026-08-31 - Android: no wake lock, and integer scaling was losing a whole step to padding
+Two freely distributable ROMs live in `temp/roms/`, with fetch commands in
+`core/tests/ppu.rs`'s header: **Celeste Classic** (sprite-heavy) and the
+**240p Test Suite** (`240pee_mb.gba`, a purpose-built PPU suite whose menus are
+LZ77 into VRAM). The 240p suite found that `LZ77UnCompVram`/`RLUnCompVram`
+wrote bytes, and VRAM turns a byte store into two copies across the halfword -
+the reason the Vram variants exist. Both now build the block in a `Vec` and
+write halfwords anywhere in `0x05000000-0x07FFFFFF` (`write_block`).
 
-Two frontend faults found on the device, both one-liners.
-`android/app/src/main/java/com/gbee/emulator/ui/screens/EmulationScreen.kt` had
-no `keepScreenOn` anywhere, so the display slept mid-play while the emulator
-kept running behind it. And the portrait `ScreenContainer` used
-`padding(horizontal = 24.dp)`, which leaves 948 px of a 1080 px screen -
-integer scaling rounds that to 3x. At 8.dp it clears 960 px, which is exactly
-4x. `AudioOutput.write` also returned `true` for a zero-sample write, so a
-frame that produced no audio left the emulation loop with nothing to block on
-and nothing to sleep on; it now returns `false` and the caller paces itself.
+### 2026-09-01 - Sprite and background priority rules
 
-### 2026-08-31 - Sprites had never rendered: the OBJ tile base was BG VRAM
+GBATEK, *LCD OBJ - OAM Attributes*: **a sprite wins a priority tie with a
+background**, and **between backgrounds the lower BG number wins a tie**. The
+sprite pass records `(colour, priority)` per pixel into `Ppu::obj_pixel` and
+mode 0's compositor merges it. Sprite-over-sprite order is in the 2026-09-10
+entry. Semi-transparent sprites (OBJ mode 1) are always a 1st target and
+always alpha-blend regardless of BLDCNT bits 4 and 6-7, but the 2nd-target
+bits 8-13 decide what they blend with, and a non-target underneath means no
+blend. OBJ-window sprites (mode 2) must still be decoded for their mask shape.
 
-The user's "pile of pink and green pixels" during Yggdra Union's opening was
-the sprite renderer. Four faults in `render_obj_scanline`, and the first alone
-means **no sprite this emulator ever drew was correct**:
+**Application**: ask `search-specialist` for the rules before writing the
+code; two of these are coin-flip cases that look plausible either way.
 
-1. **OBJ tile data was read from `0x06000000`.** It lives at `0x06010000`
-   (`0x06014000` in the bitmap modes). Every sprite was textured with whatever
-   background tiles happened to sit at the same offset - which is exactly what
-   noise made of BG art looks like. Yggdra's opening is drawn entirely with
-   sprites, so the whole sequence was bands of garbage.
-2. **The colour-depth bit was read from attr0 bit 7**, which is part of the Y
-   coordinate. GBATEK: bit 13 is the depth, bits 10-11 the OBJ mode. Any
-   sprite at Y >= 128 was decoded as 256-colour. There was also a
-   `bitmap_mode` flag taken from bit 13 that does not exist.
-3. **Tile numbers step in 32-byte units, always.** A 256-colour tile occupies
-   two of them, so an 8bpp sprite's tiles advance by two - in 1D *and* 2D
-   mapping, and 2D mapping is a fixed 32-unit-wide grid whatever the sprite's
-   width. The old code multiplied the tile number by 64 for 8bpp instead.
-4. **X and Y were sign-extended.** They are unsigned (9-bit and 8-bit) and
-   *wrap*: a sprite near the bottom reappears at the top. Sign-extending put
-   every sprite at Y >= 128 off the top of the screen. Horizontal and vertical
-   flip (attr1 bits 12-13) were not implemented at all, and sprites drew in
-   ascending OAM order so a higher-numbered sprite overwrote a lower-numbered
-   one - backwards.
+### 2026-09-01 - Affine backgrounds, and what Yggdra's gameplay exercises
 
-The affine path additionally read PA/PB/PC/PD at `0x07000000 + (0x07000006 +
-group*32)`, adding the OAM base twice, so every scaled sprite was transformed
-by whatever the **cartridge save chip** returned from `0x0E0000xx`.
+A scripted run (`temp/probes/play.rs`, which grew `SNAP=<frame>:<file>` and
+`LOAD=<file>`) reached Yggdra's first scene in ~16,000 frames: **BG mode 1**.
+`render_affine_bg_pixel` was wrong four ways: it never read the tilemap (map
+index used as the tile number), skipped the layer unless BGxCNT bit 7 was set
+(affine BGs are always 256-colour), always wrapped (bit 13 clear means
+transparent outside), and reloaded the reference point every line, throwing
+PB/PD away. The reference is now loaded at frame start, advanced by PB/PD per
+line and reloaded on a mid-frame write. BGxX/Y are 28-bit signed (19.8).
 
-**Application**: none of this showed up in `gba-suite`, in the three homebrew
-ROMs, or in 40,000 frames of Yggdra's attract loop, because all of those are
-background-only. A whole subsystem can be completely broken and still look
-fine if nothing under test exercises it - "the screens I checked render
-correctly" is not evidence that a feature works. When a report says a specific
-sequence is broken, reproduce *that* sequence rather than sampling elsewhere.
+Every Yggdra screen reached after that rendered correctly, including the
+battle map. Yggdra never enables a window. `A` doing nothing on CARD SELECT is
+game logic, not a stuck input.
 
-Method note: the layer-isolation probe settled this in one step. Render one
-frame with each of BG0-3 and OBJ forced off in DISPCNT (re-forcing it every
-step, because the game rewrites DISPCNT in VBlank), then diff the frame
-buffers: the garbage band changed only when OBJ was disabled, so nothing but
-the sprite path could be responsible.
-
-### 2026-08-31 - Homebrew test ROMs, and the LZ77 decompressor found by them
-
-Added two freely distributable ROMs to `temp/roms/`, with the fetch commands in
-`core/tests/ppu.rs`'s header:
-
-- **Celeste Classic** (`JeffRuLz/Celeste-Classic-GBA` release) - a sprite-heavy
-  platformer. Title screen and gameplay both render, on the host and on the
-  device.
-- **240p Test Suite** (`pinobatch/240p-test-mini`, the `240pee_mb.gba` build) -
-  a purpose-built PPU test suite. Its "Shadow sprite" test draws a large
-  multi-tile sprite and is the sharpest sprite check available; its menus are
-  LZ77-compressed into VRAM.
-
-The 240p suite immediately found one: **`LZ77UnCompVram` and `RLUnCompVram`
-wrote their output with `bus.write8`.** VRAM ignores byte stores - a `STRB`
-there writes the byte into *both* halves of the halfword - which is the entire
-reason the BIOS has separate Wram and Vram decompressors. Every halfword came
-out as two copies of its second byte, and the back-references then read that
-corruption back and compounded it. Both now build the block in a `Vec` (so the
-lookback is immune to the destination's behaviour) and write it out through a
-shared `write_block` that uses halfwords for anything in 0x05000000-0x07FFFFFF.
-The suite's front page went from 7 colours to 15 and the sprite test's dithered
-edges became flat.
-
-Still failing: **`fantasy-knight.gba`** (`laqieer/gba-free-fonts`) is a black
-screen. DISPCNT is 0xF641 - BG mode 1 with an affine BG2, all three windows
-enabled and OBJ on. Neither affine backgrounds (`render_mode1_scanline`'s
-affine path only handles 8bpp and is marked "not fully handled yet") nor
-windows are implemented: `get_window` and `window_layer_visible` are dead code
-and the windowing loop in `render_scanline` computes its flags and discards
-them. That is the next real PPU gap, and it will hit commercial games.
-
-### 2026-09-01 - Sprite priority, and the three ordering rules worth not guessing
-
-Sprites were composited into the frame buffer *before* the backgrounds, and
-OAM attr2 bits 10-11 - the sprite's priority - were never read, so any opaque
-background pixel covered a sprite whatever its priority said. The sprite pass
-now records `(colour, priority)` per pixel into `Ppu::obj_pixel` and mode 0's
-compositor merges that into the layer ordering.
-
-`search-specialist` was asked for the rules before the code was written, and
-returned three that are each easy to get backwards:
-
-1. **A sprite wins a tie with a background.** GBATEK, LCD OBJ - OAM
-   Attributes: "In case that the Priority relative to BG is the same than the
-   priority of one of the background layers, then the OBJ becomes higher
-   priority."
-2. **Between backgrounds, the lower BG number wins a tie** (BGxCNT bits 0-1) -
-   which a stable sort on priority alone already gives.
-3. **Between two sprites the OAM index decides on its own.** A sprite's
-   priority field is *never* compared against another sprite. GBATEK's
-   "Caution" example under OAM Attributes shows this, and VisualBoyAdvance bug
-   #130 was closed after a hardware test confirmed it. **TONC's regobj page
-   says the opposite** ("for sprites of the same priority, the higher
-   OBJ_ATTRs are drawn first") and is the outlier - the agent recorded that in
-   its own memory, verified in the diff. (Superseded 2026-09-10: this whole
-   paragraph is wrong, see the entry below.)
-
-Still not implemented, with the rules now written down in that agent's report:
-semi-transparent sprites (OBJ mode 1) are always a 1st target and always alpha
-blend regardless of BLDCNT bits 4 and 6-7, but the 2nd-target bits 8-13 still
-decide what they blend with and a non-target underneath means no blend at all.
-OBJ-window sprites (mode 2) must still be decoded for their mask shape even
-though nothing is drawn, and DISPCNT bits 12 *and* 15 both gate that.
-
-**Application**: this is the first time in the project that a hardware
-question went to `search-specialist` before the fix rather than after, and it
-paid: two of the three rules are coin-flip cases that would have looked
-plausible either way, and one has a widely-read source stating it backwards.
-
-### 2026-09-01 - Affine backgrounds never read their tilemap, and Yggdra's gameplay is mode 1
-
-Driving *Yggdra Union* past the title with a scripted key sequence
-(`temp/probes/play.rs`: Start, A, tutorial "No", then A every 250 frames) gets
-to the first scene, "Thieves' Stronghold", in about 16,000 frames. **DISPCNT
-there is 0x1761 - BG mode 1**, so the affine path matters after all; the
-attract loop and the whole opening are mode 0, which is why it had never been
-exercised.
-
-`render_affine_bg_pixel` was wrong in four ways at once:
-
-1. **It never read the tilemap.** It took the map *index* as the tile number
-   and multiplied it by 8, so the background was a linear walk through
-   character memory. On screen that is a plausible-looking striped pattern,
-   not obvious garbage.
-2. **It skipped the layer entirely unless BGxCNT bit 7 was set** - "4bpp affine
-   not fully handled yet" in its own comment. Affine backgrounds are *always*
-   256-colour; that bit means nothing for them.
-3. **It always wrapped.** BGxCNT bit 13 is Display Area Overflow: clear means
-   the area outside the map is transparent.
-4. **The reference point was reloaded from BGxX/BGxY every scanline**, which
-   throws PB and PD away - the accumulation *is* the vertical component. It is
-   now loaded at the top of the frame, advanced by PB/PD per visible line, and
-   reloaded when the game writes the register mid-frame.
-
-Also fixed alongside: BGxX/BGxY are 28-bit signed (19.8, sign in bit 27) and
-were being taken as full 32-bit values, so every negative reference point came
-out as a large positive one.
-
-**Application**: the plan was to fix windows and affine backgrounds only "if
-gameplay showed they mattered", and one scripted playthrough answered it in
-minutes - mode 1, no windows. Reaching real gameplay is worth more than
-reasoning about which gap to close next; the opening and the attract loop of a
-game can exercise a completely different quarter of the PPU than the game does.
-
-### 2026-09-01 - What Yggdra's gameplay actually exercises, and a snapshot to iterate from
-
-Drove *Yggdra Union* into real gameplay with a scripted key sequence and then
-random input, and looked at every screen it reached: the title menu, the
-Tutorial Mode prompt, the "Fall of Castle Paltina" story sequence, the
-"Thieves' Stronghold" dialogue, CARD SELECT, the CHARACTER sheet, the
-victory/defeat conditions screen and the morale/items menu. **All of them
-render correctly** after the affine fix. No new rendering defect surfaced.
-
-Two findings worth keeping:
-
-- **Yggdra never enables a window.** Every DISPCNT value seen across the whole
-  playthrough - 0x1040, 0x1240, 0x1761, 0x1B60, 0x1C40, 0x1E40, 0x1F40,
-  0x1F60 - has bits 13, 14 and 15 clear. So the unimplemented window logic is
-  not what is holding this game back, and the only ROM here that needs it is
-  `fantasy-knight.gba` (DISPCNT 0xF641). Mode 1 appears exactly once, in the
-  dialogue scene, which is what made the affine bug matter.
-- **`A` does nothing on CARD SELECT** while Start, Right, Down, L and R all
-  work from the same probe, so it is game logic (a card cannot be confirmed in
-  that state), not a stuck input. Worth remembering before chasing it as an
-  input bug.
-
-`temp/probes/play.rs` grew `SNAP=<frame>:<file>` and `LOAD=<file>`, which turn
-a four-minute run-up into a three-second one. `temp/cardselect.state` is a
-snapshot sitting on CARD SELECT; note it is a v5 save state and will be
-rejected the moment the format changes again.
+**Application**: reaching real gameplay is worth more than reasoning about
+which gap to close next; an opening and an attract loop can exercise a
+different quarter of the PPU than the game does.
 
 ### 2026-09-01 - Moving to 48 kHz exposed a PSG that had been 64x flat all along
 
-The roadmap's open Phase 1 item was the denied low-latency audio path: the core
-emitted at `16777216 / 964` = 17403 Hz, no device supports that, so AudioTrack
-resampled every buffer and refused `AUDIO_OUTPUT_FLAG_FAST`. The sample clock
-is now an exact fraction - `sample_accum += cycles * 48000`, a sample due each
-time it reaches 16777216 - which lands on 48000 Hz with no accumulated
-rounding.
+The core emitted at `16777216 / 964` = 17403 Hz, which no device supports, so
+AudioTrack resampled and denied `AUDIO_OUTPUT_FLAG_FAST`. The sample clock is
+now an exact fraction (`sample_accum += cycles * 48000`, a sample each time it
+reaches 16777216). That exposed the real bug: **every PSG channel advanced its
+phase once per emitted sample**, so the tone ROM's 128 Hz played at 2 Hz.
+Phases now run off the system clock at GBATEK's divisors (`16*(2048-n)` per
+duty step for ch1/2, `8*(2048-n)` per wave sample, `32*r*2^(s+1)` per LFSR
+step with r=0 meaning 0.5).
 
-Changing the rate is what exposed the real bug. **Every PSG channel advanced
-its phase once per emitted sample**, so its pitch was a function of the output
-rate. Measured before the change: the tone ROM programs 128 Hz and the APU
-produced **2.0 Hz** - 64x flat. Nobody had noticed because no game tested here
-uses the PSG for music; Yggdra's music is all DMA sound, and
-`core/tests/tonerom.rs` only asserted that samples were non-zero.
-
-Channel phases now run off the system clock at GBATEK's divisors: `16*(2048-n)`
-cycles per duty phase for channels 1 and 2, `8*(2048-n)` per wave sample for
-channel 3, and `32*r*2^(s+1)` per LFSR step for channel 4 (with `r=0` meaning
-0.5). Measured after: 127.9 Hz against 128.0 programmed.
-
-**Application**: "audio works" had meant "samples are non-zero" for this whole
-project. A test that asserts a signal exists says nothing about whether it is
-the *right* signal - the pitch check took ten lines and would have caught this
-at any point. Where a subsystem has a number the ROM can state and the output
-can be measured against, assert on the number.
-
-### 2026-09-01 - The battle map renders
-
-Random-input fuzzing from `temp/cardselect.state` eventually got past CARD
-SELECT to the battle map itself - "Thieves' Stronghold", terrain, the map
-layout and the Locations/Geography/Units/Formations menu, all correct. That was
-the last major screen unseen, so every part of *Yggdra Union* reached so far
-renders properly.
+**Application**: "audio works" had meant "samples are non-zero". Where the ROM
+states a number and the output can be measured against it, assert on the
+number.
 
 ### 2026-09-01 - Windows, and a "display off" bit that does not exist
 
-Implemented the window feature - the last big PPU gap. `get_window` and
-`window_layer_visible` were dead code; `render_scanline` computed window flags
-and discarded them. There is now a per-scanline `window: [u8; 240]` holding
-WININ/WINOUT's low six bits (BG0-3, OBJ, and bit 5 for the colour effect),
-built once per line and consulted by every compositor. Priority is WIN0, then
-WIN1, then the OBJ window, then outside.
+Windows are a per-scanline `window: [u8; 240]` of WININ/WINOUT's low six bits,
+consulted by every compositor; WIN0, then WIN1, then the OBJ window, then
+outside. **WINxH holds X1, the left edge, in bits 8-15** (same for V).
+OBJ-window sprites are decoded before the mask is built. And **`display_off`
+was read from DISPCNT bit 15, the OBJ window enable** - there is no display-off
+bit (forced blank is bit 7) - so any game enabling the OBJ window went black.
+That was `fantasy-knight.gba`'s black screen, stacked on the affine and window
+gaps; fixing the first two changed nothing visible.
 
-Three things worth knowing:
+**Application**: check what a register bit *is* before trusting a field named
+after what someone assumed. When a fix changes nothing visible, look for a
+second cause stacked under it.
 
-1. **WINxH holds X1 - the left edge - in bits 8-15**, so the byte at 0x40 is
-   the *right* edge. The old code read them the other way round. Same for V.
-2. **OBJ-window sprites (OAM mode 2) must still be fully decoded.** They are
-   never drawn, but their non-transparent dots are what shapes the window, so
-   the sprite pass now runs before the mask is built for every mode.
-3. **`display_off` was read from DISPCNT bit 15, which is the OBJ Window
-   enable.** There is no display-off bit; forced blank is bit 7. So any game
-   that turned the OBJ window on had its entire screen blacked out. That was
-   `fantasy-knight.gba`'s black screen, not the windows themselves - it now
-   renders its synthwave scene, grid and all.
+### 2026-09-01 - Frontend: integer scale, wake lock, audio buffer
 
-**Application**: the black screen had three independent causes stacked - the
-affine background, the missing windows, and this bit. Fixing the first two
-changed nothing visible, which is exactly the situation where it is tempting to
-conclude the fix did not work. Check what a register bit *is* before trusting a
-field named after what someone assumed it meant.
+`EmulationScreen.kt` had no `keepScreenOn`. Portrait padding of 24.dp left
+948 px of 1080, which integer scaling rounds to 3x; 8.dp clears 960 px, 4x.
+`AudioOutput` clamped its buffer up to `getMinBufferSize` (3844 frames, 80 ms -
+the safe size for the *normal* mixer); two emulated frames (1600, 33 ms) keep
+the fast path with zero underruns, and since audio is the clock that buffer is
+the floor on input latency. `AudioOutput.write` returns `false` for a
+zero-sample write so the caller paces itself.
 
-### 2026-09-01 - Saves verified on hardware, and the last PPU features landed
+### 2026-09-02 - JVM unit tests for Android, and two defects tests cannot catch
 
-Phase 1's remaining unknowns are closed. On the device: a save state written,
-the app force-stopped, relaunched, the ROM reloaded and the state restored -
-`files/states/FANTASY_KNIT_FKNT_slot0.state`, 512,135 bytes, keyed by ROM title
-and game code. Battery saves reach the disk too: `sram.gba` produced a 32 KB
-`sram.sav` beside the ROM and *Yggdra Union* an 8 KB one, its 64 Kbit EEPROM.
+`android/app/src/test/` exists since `Sai2xTest` (`gradle testDebugUnitTest`).
+Put frontend arithmetic in plain functions over plain arrays and test it on
+the JVM: seconds instead of a device round trip.
 
-Also confirmed incidentally: jsmolka's `arm.gba` prints "All tests passed" on
-the device, not just in `cargo test`.
+A self-review found two things no test would flag because neither changes a
+result: `render_mode0_scanline` allocated a `Vec` per pixel (2.3M allocations
+a second, now a fixed array), and the BIOS decompressors trusted the header's
+24-bit size (one SWI could allocate 16 MB; clamped to 256 KB). Read hot loops
+for allocations and every length from ROM data as hostile.
 
-The PPU is now feature-complete for the 2D path: windows, the OBJ window,
-semi-transparent sprites, sprite priority, affine backgrounds, alpha blending
-and brightness. `fantasy-knight.gba` - black since it was added - renders its
-synthwave scene on hardware. What is left approximate is colour effects outside
-mode 0, which still apply per scanline rather than per pixel.
+### 2026-09-03 - Modes 1-5's colour effects were gated on the wrong bit
 
-### 2026-09-01 - Frontend work: rewind, overlay settings, screenshots, and an audio buffer worth 47 ms
+Yggdra's battle screen strobed between normal and washed out. The mode 1-5
+effect call was gated on `bldcnt & 0x20` (the backdrop 1st-target bit), and
+brighten/darken hit every pixel of the line with no layer check. Fixed with
+`scanline_layer: [usize; 240]` written at every BG/OBJ write site in the mode
+1-5 renderers and checked against BLDCNT's 1st-target bits, as `blend()` does.
+Test `brighten_in_a_bitmap_mode_only_affects_the_selected_1st_target_layer`.
 
-Four frontend items, all verified on the device rather than assumed:
+**Application**: a "scanline-wide approximation" comment in this PPU flags
+skipped per-pixel layer gating.
 
-- **Rewind** is wired end to end. `core/src/rewind.rs` had existed since
-  August with no way to reach it, so five FFI functions plus JNI were the
-  missing half. A snapshot every 30 frames into a depth of 20 buys about ten
-  seconds of history for roughly 10 MB. Loading a save state clears the ring,
-  because that history belongs to the timeline you just left.
-- **Audio latency halved.** `AudioOutput` was clamping its buffer up to
-  `getMinBufferSize`, which is the safe size for the *normal* mixer - 3844
-  frames, 80 ms. Since audio is the timing master, that buffer is the floor on
-  input latency. Asking for two emulated frames gets 1600 (33 ms) with the
-  fast path still granted and zero underruns over several minutes.
-  AudioFlinger's reported track latency went 96 ms to 54 ms.
-- **Overlay size and opacity.** The first attempt allowed 1.0-1.6x and pushed
-  L, R and the outer D-pad off the screen: at 1.0 the row already spans nearly
-  the full width, so there is nowhere to grow. It is shrink-only now, 0.7-1.0,
-  with the subtitle saying when the buttons drop below the 48.dp touch target.
-  One `graphicsLayer` on the control block does it - Compose maps pointer
-  input through the same transform, so the targets stay in register.
-- **Screenshots** at native 240x160 into `Pictures/GBee`.
+### 2026-09-07 - A scanline drawn at the end of its line eats the HBlank handler's writes
 
-**Application**: two of these four were "the core side is done, nothing can
-reach it" - rewind had no FFI, and the audio buffer had no one asking whether
-`getMinBufferSize` was the right number for a fast track. Same shape as the
-seven core features that had no caller. When a layer boundary exists, check
-both sides of it.
+From a Yggdra save state, two panels flickered between exactly two pictures
+(11895 pixels) while `io`, `pal`, `vram` and `oam` hashed **identical** across
+frames. The game's HBlank handler writes `BG1VOFS` once per line. `Ppu::tick`
+drew the line at cycle 1232, but the HBlank IRQ fires at 960, so the write
+landed on line N or N+1 depending on CPU/PPU phase. Now the line is drawn when
+HBlank starts, with a `line_rendered` catch-up for a step that jumps over 960.
+Test `a_register_written_during_hblank_takes_effect_on_the_next_line`.
 
-### 2026-09-02 - JVM unit tests exist for Android now, and what they bought
+**Application**: an effect one line off, or a two-frame flicker with the game's
+memory unchanged, is render timing. Hash `io`/`pal`/`vram`/`oam` first;
+identical hashes mean the bug is ours.
 
-`android/app/src/test/` did not exist and there was no JUnit dependency: the
-Kotlin side had never been testable without a device. Added
-`testImplementation("junit:junit:4.13.2")` and `Sai2xTest`, six cases, run with
-`gradle testDebugUnitTest`.
+### 2026-09-07 - EEPROM's ready flag is polled by the CPU, not by DMA
 
-That was worth doing the moment there was non-trivial Kotlin logic. `Sai2x` is
-deliberately written as free functions over plain `IntArray`s rather than
-anything Compose- or Bitmap-shaped, precisely so it can be exercised on the
-JVM. The tests pin the properties that distinguish 2xSaI from a blur - a flat
-image stays flat, a hard edge stays hard away from the seam, every output pixel
-is written, a short destination is left untouched.
+Yggdra answered "Save failed!": six write commands, no reads. After a write
+the save library spins on a plain `ldrh` of the EEPROM window for bit 0. Only
+the DMA path consulted the chip; CPU reads fell through to the ROM mirror
+(`0xFF80` on this 32 MB cart, whose window is `0x0DFFFF00-0x0DFFFFFF`). `read8`
+now returns 1 across the window. Test
+`a_cpu_read_of_the_eeprom_window_reports_the_chip_ready`.
 
-**Application**: when adding frontend logic that is not just wiring, put the
-arithmetic in a plain function over plain arrays and test it here. The device
-round-trip is minutes; this is seconds.
+**Application**: a save chip never read back is a handshake the game gave up
+on. Check the poll path before the data path.
 
-### 2026-09-02 - Two defects the tests could never have caught
+### 2026-09-07 - Games fake transparency by alternating frames; the LCD hid it
 
-A self-review of the branch found two things no test would have flagged,
-because neither changes a result:
+Yggdra's "SAVE DATA" title blinks: here `vram` and `oam` **do** change every
+frame - the game redraws on alternating lines and the slow LCD smeared it.
+`Ppu::set_interframe_blend` averages each frame with the previous one;
+`prev_frame` keeps the *unblended* frame (or the picture fades), and the result
+goes to a separate `blend_out` because `run_frame` can stop part way down the
+next frame.
 
-1. **`render_mode0_scanline` allocated a `Vec` per pixel** - 38,400 heap
-   allocations a frame, 2.3M a second, in the hottest loop in the emulator. It
-   arrived with the sprite-priority work. Now a fixed `[_; 4]` array.
-2. **The BIOS decompressors trusted the header's 24-bit size field**, so a
-   corrupt ROM could make one SWI allocate 16 MB and loop - measured at 0.71 s
-   against 0.01 s. Clamped to 256 KB, which is larger than any GBA destination.
+**Application**: before hunting a flicker, hash `vram`/`oam` across two
+frames. Changing means the game is doing it on purpose.
 
-**Application**: the test suite answers "is the output right", and both of
-these produce the right output. Cost and robustness need a different kind of
-looking - read the hot loop for allocations, and read every length that comes
-from ROM data as hostile. Worth a deliberate pass rather than waiting for a
-symptom.
+### 2026-09-09 - Fast-forward speed is the game's business, not the emulator's
 
-### 2026-09-03 - Modes 1-5's colour effects brightened/darkened the whole
-screen, gated on the wrong BLDCNT bit entirely
-
-Device testing on Yggdra Union (Jaws of the Wolf battle screen) showed the
-whole screen strobing every other frame between normal colours and a
-washed-out version - white text unchanged, dark panels blown toward white.
-Two bugs stacked in `core/src/ppu/mod.rs`:
-
-1. The call to `apply_color_effects` for `bg_mode != 0` was gated on
-   `bldcnt & 0x0020` - bit 5 is BLDCNT's *backdrop* 1st-target-select bit, not
-   an "an effect is active" flag. The whole brighten/darken pass silently
-   turned on and off with whatever the game did to an unrelated bit.
-2. Even when it ran, `apply_brightness_inc`/`_dec` brightened or darkened
-   **every pixel on the scanline** with no idea which layer produced it - no
-   check against BLDCNT's 1st-target-select bits at all. Mode 0 already gets
-   this right (`blend()`, gated per-pixel on `top_layer` from its compositing
-   stack); modes 1-5 never tracked layer identity per pixel, so there was
-   nothing to gate on.
-
-Fix: added `scanline_layer: [usize; SCREEN_WIDTH]`, written at every BG/OBJ
-write site in the mode 1-5 renderers (bitmap modes are BG2 top to bottom, so
-just `[2; SCREEN_WIDTH]`; the OBJ overlay pass sets `LAYER_OBJ` after BG
-draws), then `apply_brightness_inc/_dec` gate each pixel on
-`bldcnt & (1 << scanline_layer[x])`, the same check `blend()` uses. Removed
-the wrong `& 0x0020` outer gate entirely - `apply_color_effects` already
-no-ops on effect 0. Regression test:
-`tests/ppu.rs::brighten_in_a_bitmap_mode_only_affects_the_selected_1st_target_layer`
-(mode 4 bitmap pixel + a non-overlapping sprite, only BG2 selected as 1st
-target - confirmed it fails on the pre-fix code with the OBJ pixel wrongly
-brightened).
-
-**Application**: any "scanline-wide approximation" comment in this PPU is a
-flag that per-pixel layer gating was skipped - check what BLDCNT's target
-bits are being checked against, if anything, before trusting a colour effect
-outside mode 0.
-
-### A scanline drawn at the end of its own line eats the HBlank handler's writes
-
-**2026-09-07**, found from a user save state of Yggdra Union: the two battle
-condition panels flickered, the frame buffer alternating between exactly two
-pictures forever with 11895 pixels changing per frame.
-
-It was not blending, palette or VRAM. With the state loaded, `io`, `pal`,
-`vram` and `oam` hash **identical** between the two frames - the difference was
-entirely inside the PPU.
-
-The game's HBlank handler writes `BG1VOFS` (`0x04000016`) once per line, on
-lines 55-83 and 95-134, the exact rows that diverged. That is the trick that
-locks one BG row to the screen and draws the panels. `Ppu::tick` drew the line
-at the **end** of it, when `cycle_counter` crossed 1232, but the HBlank IRQ
-fires at cycle 960 of the same line - 272 cycles earlier. On hardware the
-HBlank of line N sets up line **N+1**, because line N is already drawn. Here
-the write still had time to land on line N, and whether it did was a race the
-CPU won or lost depending on the CPU/PPU phase, which shifts every frame:
-
-```
-frame 0 line 55 drawn with BG1VOFS 105  (BG row 160 - the panel)
-frame 1 line 55 drawn with BG1VOFS 104  (BG row 159 - the map)
-```
-
-Fix: draw the line when its HBlank starts, before `hblank_irq_pending` is set.
-A `line_rendered` flag keeps the line-end path as a catch-up for a `step` long
-enough to jump over cycle 960 entirely. Test:
-`tests/integration.rs::a_register_written_during_hblank_takes_effect_on_the_next_line`.
-
-**Application**: any per-scanline effect that is one line off, or flickers
-between two frames with the game's memory unchanged, is a render-timing
-question, not a rendering one. Hash `io`/`pal`/`vram`/`oam` across frames
-first - identical hashes mean the bug is ours.
-
-### EEPROM's ready flag is polled by the CPU, not by DMA
-
-**2026-09-07**: Yggdra Union answered "Save failed!" and never wrote a `.sav`.
-Save type detection was right (`EEPROM_V126`, 8 KB). Tracing the serial line
-showed the game sending six write commands - `addr=2` and `addr=618`, three
-tries each - and **no reads at all**.
-
-After a write command the standard save library spins reading the EEPROM
-window with a plain `ldrh`, waiting for bit 0 to come back 1. Only
-`MemoryBus::read16_mut` - the DMA path - consulted the chip; `read8`, and so
-`read16`/`read32`, fell through to the ROM mirror underneath. On this 32 MB
-cart the window is `0x0DFFFF00-0x0DFFFFFF` (GBATEK: above 16 MB the EEPROM
-shrinks to the last 256 bytes, because the ROM itself reaches those addresses
-through the WS2 mirror), and the ROM holds `80 ff` there - `read16` = 0xFF80,
-bit 0 clear, "still programming", forever.
-
-Fix: `read8` returns 1 anywhere in the EEPROM window. Reading *data* by CPU
-stays impossible, as on hardware. Test:
-`tests/saves.rs::a_cpu_read_of_the_eeprom_window_reports_the_chip_ready`.
-
-**Application**: a save chip that never gets read back is not a protocol bug,
-it is a handshake the game gave up on. Check the poll path before the data
-path.
-
-### Games fake transparency by alternating frames; the LCD hid it
-
-**2026-09-07**: Yggdra Union's "SAVE DATA" title blinks hard. Unlike the panel
-bug above, `vram` and `oam` **do** change every frame while `io` and `pal` do
-not - the game itself redraws the title on alternating scanlines to fake a 50%
-ghost, which the GBA's slow LCD smeared into a steady image.
-
-`Ppu::set_interframe_blend` averages each finished frame with the one before
-it. Two details that matter: `prev_frame` keeps the *unblended* frame, so the
-average never feeds on its own output and fade out; and the result goes to a
-separate `blend_out` buffer, because `run_frame` spends a cycle budget and can
-stop part way down the next frame - blending in place handed the frontend a
-few freshly drawn unblended lines over an older blended picture, which left
-the top 7 rows still flickering.
-
-**Application**: before hunting a flicker in the PPU, hash `vram`/`oam` across
-two frames. Changing means the game is doing it on purpose.
-
-### Fast-forward speed is the game's business, not the emulator's
-
-**2026-09-09**, measured on a Mi 10T Pro with the audio-clocked fast forward
-and the render skip in place, arm64 release core:
-
-| ratio | Yggdra Union | Mario Tennis |
-|---|---|---|
-| 2 | **2.00x**, 60 updates/s | 1.44x, 43 updates/s |
-| 4 | **4.00x**, 60 updates/s | 1.55x, 23 updates/s |
-| 8 | 5.32x, 40 updates/s | 1.60x, 12 updates/s |
-| 16 | 4.34x, 16 updates/s | 1.63x, 6 updates/s |
-
-The ratio is exact until the CPU runs out. Yggdra Union hits 2x, 3x and 4x
-dead on with the picture still at 60 updates a second - the blocking audio
-write really is the clock. Mario Tennis is CPU-bound before 2x, so every ratio
-gives about 1.5x and a higher one only costs smoothness.
-
-Past that point a higher ratio is actively worse: on Yggdra the peak is ~5.5x
-at ratio 6, and ratio 16 is both slower (4.34x) and a slideshow.
-
-Desktop (WSL2), Yggdra, core alone: 2.15x frame by frame, 3.74x in batches of
-16. Slow for a GBA interpreter, and worth its own optimisation project - but
-not the wall.
-
-**Application**: never quote one game's speed as the emulator's speed. An
-earlier version of this note did exactly that, took Mario Tennis's 1.34x for a
-hard ceiling, and concluded fast forward could not go above 1.5x - which is
-wrong by a factor of three on the game the user actually plays. Measure at
-least two games, and let the player pick the ratio. Full write-up in
+With the audio-clocked fast forward on a Mi 10T Pro, Yggdra hits 2.00x, 3.00x
+and 4.00x exactly at 60 updates a second; Mario Tennis is CPU-bound before 2x
+and gives ~1.5x at every ratio. Past the CPU limit a higher ratio is slower
+and choppier (Yggdra peaks ~5.5x at ratio 6). Decision and numbers in
 [`docs/research/fast-forward.md`](../docs/research/fast-forward.md).
 
-### GBATEK is wrong about sprite-over-sprite ordering
+**Application**: never quote one game's speed as the emulator's speed. An
+earlier note took Mario Tennis's figure for a ceiling and was wrong by 3x on
+the game the user plays. Measure two games and let the player pick the ratio.
 
-**2026-09-10**, found from a Mario Tennis Advance save state: the 3-2-1-GO
-countdown was drawn *behind* the target panels it overlaps.
+### 2026-09-10 - GBATEK is wrong about sprite-over-sprite ordering
 
-The countdown digits are sprites at OAM 9 and 10 with **priority 0**. The
-panels are sprites at OAM 1 and 2 with **priority 2**. This PPU implemented
-"between two sprites the lower OAM index always wins, priority is only ever
-compared against the backgrounds", so the panels won and covered the number.
+Mario Tennis's 3-2-1-GO digits (OAM 9-10, priority 0) were drawn behind panels
+(OAM 1-2, priority 2), because the code followed GBATEK's Caution paragraph
+("OBJ0 is always having priority above OBJ1-127"). VisualBoyAdvance bug #130's
+test cannot isolate the case. mGBA (`software-obj.c`) and NanoBoyAdvance
+(`sprite.cc`) both compare priority only and walk OAM upwards. The rule:
+**priority decides, the OAM index only breaks an exact tie**. TONC's regobj
+page was right. Tests
+`a_sprite_with_a_better_priority_beats_a_lower_oam_index`,
+`between_sprites_of_equal_priority_the_lower_oam_index_wins`.
 
-That rule was in the code *and* in a test that cited two sources. Both were
-re-checked and neither holds:
+**Application**: a confident sentence in GBATEK is not the end of the
+argument. Check what mGBA and NanoBoyAdvance *do*, and when they disagree say
+so in the comment. Only a hardware test ROM closes it completely.
 
-- **GBATEK says it outright** - "OBJ0 is always having priority above
-  OBJ1-127", in the Caution paragraph under *LCD OBJ - OAM Attributes*, with
-  no qualification. It is simply wrong here. This is one of the few places
-  where GBATEK's text and every reference implementation disagree.
-- **VisualBoyAdvance bug #130** exists and its maintainer states the same
-  rule, but its test put the *lowest* OAM index on the *worst* priority. Both
-  rules predict the same picture for that setup, so it never isolates the
-  case it was cited for.
-- **mGBA** (`src/gba/renderers/software-obj.c`,
-  `if ((current & FLAG_ORDER_MASK) > flags)`) and **NanoBoyAdvance**
-  (`src/nba/src/hw/ppu/sprite.cc`, `if (priority < pixel.priority || ...)`)
-  independently compare the priority value and nothing else, walking OAM
-  upwards so an equal priority keeps the earlier sprite.
+### 2026-09-29 - Achievements: what the integration needs, and the two traps
 
-The rule is: **priority decides, and the OAM index only breaks an exact tie**
-- which falls out for free from walking OAM in order and overwriting only on a
-strictly lower priority. Tests:
-`tests/ppu.rs::a_sprite_with_a_better_priority_beats_a_lower_oam_index` and
-`::between_sprites_of_equal_priority_the_lower_oam_index_wins`.
+PRs #30-#32. `docs/achievements.md` has the full reasoning.
 
-**Application**: a plain, confident sentence in GBATEK is not the end of the
-argument. When a real game looks wrong and the code cites documentation, check
-what mGBA and NanoBoyAdvance actually *do* before trusting the sentence - and
-when the two disagree, say so in the comment instead of picking one quietly.
-Nothing open-source tests this case, so a purpose-built ROM on real hardware
-is the only way to close it completely.
+1. **`rcheevos` belongs on the Android side, never in `core/`.** The core
+   gained only `gbee_peek_memory`.
+2. **The peek must not reuse `read8`**, whose EEPROM-window "chip ready"
+   answer is right for a game and wrong for an observer. `peek` reads 0 there
+   and is `&self`.
+3. **rcheevos addresses a flat block, and a wrong map fails silently**:
+   `0x000000-0x007FFF -> 0x03000000` (IWRAM), `0x008000-0x047FFF ->
+   0x02000000` (EWRAM), `0x048000-0x057FFF -> 0x0E000000` (save).
+4. **A ROM is identified by an MD5 of the whole file**: a renamed ROM matches,
+   a trimmed or patched one does not.
+5. **The runtime's state travels with save states**
+   (`rc_client_serialize_progress`), or a load desyncs game and achievements.
+6. **Hardcore is not a code decision**: approval plus six months public, and
+   no save states, rewind or frame advance.
 
-### 2026-09-29 - Achievements: what the integration actually needs, and the two traps
+**Application**: two bugs were only findable by use: the client was gated on
+the emulator library being loaded (nobody signs in with a game open), and
+`stopEmulation` unloaded the session while the ROM reload guard meant it never
+came back. Check anything "session lifecycle" against that guard.
 
-**Context**: adding RetroAchievements (softcore) end to end, PRs #30-#32.
-
-**Finding**:
-
-1. **`rcheevos` belongs on the Android side, never in `core/`.** It is C, and
-   `core/` is a Rust crate whose whole rule is `log` and `thiserror`. Deciding
-   what an achievement means is not emulation. The core gained exactly one
-   thing: `gbee_peek_memory`.
-
-2. **The peek must not reuse `read8`.** `read8`'s first act is to answer the
-   EEPROM window with "chip ready", which is right for a game polling after a
-   write and catastrophic for an observer walking memory once a frame. `peek`
-   reads 0 across that window whatever cart is in, and is `&self` throughout.
-
-3. **rcheevos addresses memory as a flat block, and the translation fails
-   silently.** GBA is three regions:
-   `flat 0x000000-0x007FFF -> 0x03000000` (IWRAM),
-   `flat 0x008000-0x047FFF -> 0x02000000` (EWRAM),
-   `flat 0x048000-0x057FFF -> 0x0E000000` (save memory).
-   Get it wrong and nothing errors - every achievement reads the wrong bytes
-   and never fires.
-
-4. **A GBA ROM is identified by an MD5 of the whole file.** So a renamed ROM
-   matches and a **trimmed or patched one does not**. This is the opposite
-   trade-off from cover art, where the cart's own game code survives both.
-
-5. **An achievement is a transition, not a flag.** Nothing can scan a save and
-   award what was already done, by design. The corollary is that the
-   achievement runtime's own state must travel **with** save states -
-   `rc_client_serialize_progress` - or loading a state puts the game in one
-   moment and the achievement logic in another.
-
-6. **Hardcore is not a code decision.** It needs approval plus six months of
-   public availability, and forbids save states, rewind and frame advance.
-   The server says so itself in the achievement list: "Warning: Unknown
-   Emulator".
-
-**Application**: `docs/achievements.md` carries the full reasoning, the counts
-and the sources. Two bugs here were only findable by using the app, not by
-building it: the client was gated on the emulator's library being loaded (but
-nobody signs in with a game open), and `stopEmulation` unloaded the session
-while the ROM reload guard meant it never came back. Anything that looks like
-"session lifecycle" in this app should be checked against that guard.
-
-
-### 2026-10-02 - Homebrew suites beyond gba-suite, and what they found
+### 2026-10-02 - Homebrew suites beyond gba-suite
 
 `core/tests/homebrew_suites.rs` runs FuzzARM, ARMWrestler and the mGBA suite
-from `temp/roms/` (fetch commands in its header). Results on 2026-10-02:
+from `temp/roms/` (fetch commands in its header). ARMWrestler 79/79; all five
+FuzzARM ROMs are gates since the THUMB shift-by-register-0 N/Z fix (#58). The
+mGBA suite's score history is the table in `ROADMAP.md`, Phase 4.5.
 
-- **ARMWrestler 79/79 OK** (ARM and THUMB pages), **FuzzARM ARM ROMs clean**.
-- **FuzzARM THUMB ROMs fail on one bug**: THUMB format-4 `lsl/lsr/asr/ror
-  Rd, Rs` with `Rs & 0xFF == 0` skips the N/Z update (`core/src/cpu/thumb.rs`,
-  the `shift == 0` arms of the ALU block). GBATEK: N and Z are always set,
-  only C is unchanged. The three tests are `#[ignore]`d with that reason.
-- **mGBA suite 3602/6998** (score, `#[ignore]`d): Shifter 140/140 and Carry
-  93/93 perfect; Timer IRQ 0/90, I/O read 10/130, Timing 235/2020, SIO near 0.
-  The timing numbers are expected for an interpreter without per-access
-  waitstates. (Timer IRQ and I/O read were fixed to 90/90 and 130/130 on
-  2026-10-02 - see the entry below.)
-- `bios::arc_tan` panicked in debug builds on the suite's inputs; fixed with
-  32-bit wrapping arithmetic. (Its coefficients were also wrong - see the
-  2026-10-04 BIOS math entry.)
+Two harness traps: FuzzARM writes its EWRAM dump marker *first* and the rest
+between slow text draws, so wait for its key-down loop, not the marker. And
+ARMWrestler draws verdicts as bitmap text; the harness reads the failure mask
+at the entry of its `DrawResult` routine, found by byte pattern.
 
-Two harness traps, so nobody rediscovers them: FuzzARM writes its EWRAM dump
-marker *first* and the rest between slow text draws, so reading on the marker
-deadlocks the key handshake - wait for its key-down loop instead. And
-ARMWrestler draws its verdicts as bitmap text; the harness reads the failure
-mask at the entry of its own `DrawResult` routine, found by byte pattern.
+### 2026-10-02 - Timer IRQ 90/90 and I/O read 130/130: what the model assumes
 
-### 2026-10-02 - Timer IRQ 90/90 and I/O read 130/130: what the model now assumes
-
-Branch `fix/mgba-suite-timer-irq-io-read`. mGBA suite 3602 -> 4204/6998.
-
-- **The CPU's view of I/O and the hardware's latched view are two different
-  reads.** `MemoryBus::read8/16/32` now apply `io::read_rule` (readable-bit
-  masks, open bus for write-only registers). The PPU and APU need the
-  write-only bits (scroll, frequency, length), so they read through
-  `MemoryBus::io_read8/io_read16`. **Any new internal consumer of an I/O
-  register must use `io_read*`**; `bus.read16(0x0400_00xx)` from core code
-  now silently returns 0xDEAD-style open bus for write-only registers.
-- Open bus is GBATEK "Reading from Unused Memory": `Cpu::step` publishes the
-  executing PC and state into `bus.exec_pc/exec_thumb`, and `open_bus()`
-  re-reads the prefetch. Unmapped memory (`_` arm of `read8`) uses it too.
-- Timer/IRQ timing fitted to the suite's hardware values, all three needed
-  together: timer register writes apply *after* that instruction's timer
-  tick; a newly started timer skips one more cycle (`Timer::delay_start`);
-  `TMxCNT_L` is published one count ahead because a load samples in its
-  second cycle; IRQs are taken `IRQ_DELAY = 4` cycles after the line rises
-  (`lib.rs`). The BIOS IRQ stub is now the real BIOS sequence
-  (`b 0x128` ... `ldr pc, [r0, #-4]`, so r0 = 0x04000000 and the user handler
-  must be ARM, as on hardware); exception entry costs 3 cycles; ARM writes to
-  PC pay the 2-cycle refill.
-- **Left open**: Timer count-up 729/936. (Fixed to 936/936 on 2026-10-03,
-  branch `fix/timer-count-up-prescaler` - see the entry below.)
+- **The CPU's view of I/O and the hardware's latched view are two reads.**
+  `MemoryBus::read8/16/32` apply `io::read_rule` (readable-bit masks, open bus
+  for write-only registers). The PPU and APU need the write-only bits, so
+  **any internal consumer of an I/O register must use `io_read8/io_read16`**;
+  `bus.read16(0x0400_00xx)` from core code returns open bus for write-only
+  registers.
+- Open bus is GBATEK "Reading from Unused Memory": `Cpu::step` publishes PC
+  and state into `bus.exec_pc/exec_thumb`, and `open_bus()` re-reads the
+  prefetch.
+- Timer/IRQ timing fitted to the suite's hardware values, all needed together:
+  timer register writes apply *after* that instruction's timer tick; a newly
+  started timer skips one more cycle (`Timer::delay_start`); IRQs are taken
+  `IRQ_DELAY = 4` cycles after the line rises. The BIOS IRQ stub is the real
+  sequence (`b 0x128` ... `ldr pc, [r0, #-4]`, so the user handler must be
+  ARM); exception entry costs 3; ARM writes to PC pay the 2-cycle refill.
 - **Save states carry no BIOS memory, so the HLE BIOS layout is a save-state
-  format.** Moving the IRQ stub to 0x128 broke every quick save taken inside
-  a game IRQ handler under the old stub (LR = 0x28): the return slid through
-  zeroed BIOS into the stub forever. Yggdra Union on the device: 37 fps, 5400
-  underruns, a stack overflow before the open-bus recursion guard. Fresh
-  boots were fine, which is why the suites and host runs missed it. The old
-  epilogue now stays at 0x28/0x2C (`init_bios`); test
+  format.** Moving the stub to 0x128 broke every quick save taken inside an
+  IRQ handler under the old stub (LR = 0x28): Yggdra at 37 fps, 5400
+  underruns. The old epilogue stays at 0x28/0x2C (`init_bios`); test
   `an_irq_handler_from_an_old_save_state_still_returns_through_0x28`. Any
   future BIOS-stub change must keep every address an old state can hold.
 
-## 2026-10-02 - Per-step cost after the timer fix (branch perf/core-after-timer-fix)
+### 2026-10-02 - Per-step cost after the timer fix (#62)
 
-- **The PR #60 slowdown was the per-step timer work, not the I/O masks or
-  open bus.** Sampled profile of Mario Tennis (142.7k steps/frame): publishing
-  `TMxCNT_L` one count ahead (`Timer::counters` -> `counter_after_one_cycle`,
-  every step) ~4%, the count-by-count `Timer::tick` loop ~9%, `Gba::step`
-  self +3 points. `read_rule`/open bus did not register. Fixed by a no-overflow
-  fast-forward in `Timer::tick`, a RAM/ROM fast path for `read16`/`read32`
-  (`MemoryBus::plain`), and skipping empty write queues. Host, interleaved,
-  median: Mario Tennis 8.54 (a9d34a8) / 9.40 (master) / 7.64 ms per frame;
-  Yggdra 4.94 / 4.84 / 4.50. Equivalence tests:
-  `ticking_a_slice_at_once_matches_ticking_it_cycle_by_cycle`,
+- **The #60 slowdown was the per-step timer work**, not the I/O masks:
+  publishing `TMxCNT_L` ahead every step ~4%, the count-by-count
+  `Timer::tick` ~9%. Fixed by a no-overflow fast-forward in `Timer::tick`, a
+  RAM/ROM fast path for `read16`/`read32` (`MemoryBus::plain`), and skipping
+  empty write queues. Mario Tennis 9.40 -> 7.64 ms a frame on the host.
+  Equivalence tests `ticking_a_slice_at_once_matches_ticking_it_cycle_by_cycle`,
   `wide_reads_match_the_byte_path`.
-- **`Timer::tick`'s first-IRQ offset is the lowest-numbered timer's, not the
-  earliest.** Timers are processed one after another over the whole slice, so
-  when two timers raise IRQs in one instruction the IRQ delay is timed from
-  the lower index. Only matters for slices long enough to hold two overflows;
-  left as is (behaviour-preserving branch). The equivalence test documents it.
-- **Still per step and inherent to the design:** the four-timer publish into
-  `io_regs` (the bus cannot see the timer, so a read cannot compute it
-  lazily), `apu.tick`, `ppu.tick`. Moving the timer into the bus would make
-  `TMxCNT_L` reads lazy; not worth it for ~3%.
+- **`Timer::tick`'s first-IRQ offset is the lowest-numbered timer's**, not the
+  earliest, when two timers overflow in one slice. Left as is; the
+  equivalence test documents it.
+- Still per step by design: the four-timer publish into `io_regs` (the bus
+  cannot see the timer), `apu.tick`, `ppu.tick`. Moving the timer into the bus
+  is not worth ~3%.
 
-## 2026-10-03 - Timer count-up 936/936: three causes, only one of them fitted
+### 2026-10-03 - Timer count-up 936/936: three causes, one fitted
 
-Branch `fix/timer-count-up-prescaler`. mGBA suite 4204 -> 4411/6998; no
-other sub-suite moved.
+- **HALT woke on PPU events only**, so a timer IRQ while halted woke up to
+  ~1000 cycles late. `Gba::step` also stops at `Timer::cycles_to_irq()`. Test
+  `a_timer_irq_ends_halt_on_the_overflow_cycle`.
+- **Prescaled timers count on global prescaler edges** (`Timer::align_start`).
+  The suite's table shows it (15 extra cycles cost 6 passes at /64 but gain 2
+  at /256 and /1024); GBATEK is silent. Test
+  `a_prescaled_timer_counts_on_the_global_prescaler_edges`.
+- **HLE `IntrWait` returned ~45 cycles early after a wake**
+  (`bios::INTR_WAIT_RETURN_CYCLES`, charged through `Cpu::entry_cycles`).
+  Fitted but sharp (44: 16 fails, 45: 0, 46: 18). Only the after-a-wake return
+  is charged.
+- `timer_count_up_matches_the_mgba_suite` replays the suite's own code copied
+  out of IWRAM, because the dispatcher's length is part of the result.
 
-- **Why the earlier phase sweep never converged: HALT woke on PPU events
-  only.** The halted path advanced straight to the next HBlank/line end, so a
-  timer IRQ while halted woke the CPU up to ~1000 cycles late, at a point set
-  by where in the scanline the overflow fell. `Gba::step` now also stops at
-  `Timer::cycles_to_irq()`. Test `a_timer_irq_ends_halt_on_the_overflow_cycle`.
-- **Prescaled timers count on global prescaler edges** (`Timer::align_start`,
-  mGBA's `currentTime &= ~tickMask`). Evidence in the suite's hardware table:
-  15 extra delay cycles cost 6 loop passes at prescaler 64 but gain 2 at
-  256/1024 - only a free-running divider explains that. GBATEK does not say
-  either way. Test `a_prescaled_timer_counts_on_the_global_prescaler_edges`.
-- **HLE `IntrWait` returned ~45 cycles too early after a wake**
-  (`bios::INTR_WAIT_RETURN_CYCLES`, charged through `Cpu::entry_cycles`). The
-  real BIOS runs its flag check and SWI epilogue there; mGBA's cycle-padded
-  HLE BIOS tail costs 39 cycles on our CPU. 45 is fitted, but the fit is sharp
-  (44: 16 fails, 45: 0, 46: 18). Only the after-a-wake return is charged; an
-  `IntrWait` satisfied immediately, `Halt` and every other SWI still cost 3.
-- `timer_count_up_matches_the_mgba_suite` replays the suite's own code (test
-  body, libgba `IntrMain`, `testIrq`) copied out of IWRAM of a running suite,
-  against hardware values. A hand-written handler would not reproduce them:
-  the dispatcher's length is part of the result.
-- Cost: Mario Tennis +~3% per frame on the host (5.92 -> 6.10 ms, interleaved
-  medians). About 1 point is code layout; the rest follows the alignment,
-  which changes the game's execution (same 142.7k steps a frame, different PC
-  trace), not the per-step work.
-
-## 2026-10-04 - DMA tests 1244/1244: the DMA reads its own latch, and ROM always increments
-
-Branch `fix/mgba-suite-dma`. mGBA suite 4411 -> 4715/6998 (DMA 1056 -> 1244,
-Memory 1346 -> 1462 from the same fixes); no other sub-suite moved.
+### 2026-10-04 - DMA 1244/1244: the DMA reads its own latch, and ROM always increments
 
 - **A DMA read below EWRAM returns that channel's last transferred value**
-  (`DmaChannel::latch`, halfwords latched on both halves, `dma.rs` `fetch`).
-  That covers the BIOS, unmapped 0x00004000-0x01FFFFFF, and DMA0 reading ROM
-  (its 27-bit source mask folds 0x08xxxxxx to 0x00xxxxxx). 152 of the 188
-  failures. GBATEK's BIOS read protection describes the CPU; the suite's
-  hardware values show a DMA never sees the BIOS opcode. The latch is per
-  channel (the suite skips "0 R+0x10" because it "would latch based on the
-  last DMA 0 test"). A halfword written from a word latch takes the lane of
-  `dest & 2`.
-- **A gamepak ROM source (0x08-0x0D) always increments**, fixed and
-  decrement included. The other 36. GBATEK does not say so; mGBA and the
-  suite agree.
-- **DMA drops the address bits below its unit width at the enable edge**
-  (`Gba::apply_dma_writes`). Only visible on the 8-bit SRAM bus, which keeps
-  the low bits for a CPU access.
-- Save-state v8 appends the four latches; v6/v7 load with latches 0. The tail
-  layout is now save_len, cycles, chip (18), latches (16) - `tests/saves.rs`
-  hard-codes that offset.
-- The Memory leftovers this left were fixed the same day - see the next
-  entry.
+  (`DmaChannel::latch`, per channel, halfwords latched on both halves). That
+  covers the BIOS, unmapped `0x00004000-0x01FFFFFF`, and DMA0 reading ROM
+  (its 27-bit mask folds 0x08 to 0x00). A halfword from a word latch takes the
+  lane of `dest & 2`.
+- **A GamePak ROM source always increments**, fixed and decrement included.
+  GBATEK is silent; mGBA and the suite agree.
+- **DMA drops the address bits below its unit width at the enable edge**,
+  visible only on the 8-bit SRAM bus.
 
-## 2026-10-04 - BIOS math 615/615, multiply long 72/72, Memory 1552/1552
-
-Branch `fix/mgba-suite-bios-mul-memory`. mGBA suite 4715 -> 5135/6998; no
-other sub-suite moved. The fail lists come from the suite's SRAM log.
+### 2026-10-04 - BIOS math 615/615, multiply long 72/72, Memory 1552/1552
 
 - **The HLE ArcTan had three wrong coefficients** (0xFB60, 0x16C9, 0x3B10
-  where the BIOS has 0xFB6, 0x16AA, 0x3651; the 0x390 and 0x2081 terms were
-  right). The "series diverges past PI/4, reproduce it" belief came from that
-  bug: hardware returns 0x2000 for tan = 1.0, not 0x59B3. Also: ArcTan uses
-  the whole of r0 (0x0000C000 is +3.0, not -1.0) and returns a sign-extended
-  halfword; the BIOS leaves r1 = `a` and r3 = `b` (series terms), ArcTan2
-  leaves r1 = `a` (or y on an axis) and r3 = 0x170, Div leaves r3 =
-  |quotient|, and x / 0 returns sign(x), r1 = x, r3 = 1 (hangs on hardware
-  for |x| > 1; the HLE does not). `tests/bios.rs` embeds the suite's whole
-  123-row hardware table.
-- **Multiply C is the Booth array's carry, and mGBA does not model it**
-  (its MULL leaves C alone; it fails these 20 suite rows too). The model is
-  zaydlang's bit-level simulation of the multiplier array
-  (github.com/zaydlang/multiplication-algorithm, zlib), translated in
-  `cpu/arm.rs` `booth_carry`, with the zlib notice there and in
-  `THIRD_PARTY_NOTICES.md`. **Never port from NanoBoyAdvance**: its code
-  (including its version of this model) is GPL-3.0, which cannot enter this
-  MIT project. The model covers MUL/MLA and THUMB MUL as well, which no
-  hardware table here checks. V is unchanged.
-  Multiply cycle counts (`mI`) are still the fixed 4/5 approximation.
+  where the BIOS has 0xFB6, 0x16AA, 0x3651). Hardware returns 0x2000 for
+  tan = 1.0. ArcTan uses all of r0 and returns a sign-extended halfword; the
+  BIOS leaves r1 = `a`, r3 = `b`; ArcTan2 leaves r3 = 0x170; Div leaves r3 =
+  |quotient|, and x / 0 returns sign(x), r1 = x, r3 = 1 (the real BIOS hangs
+  for |x| > 1). `tests/bios.rs` embeds the suite's 123-row hardware table.
+- **Multiply C is the Booth array's carry**, which mGBA does not model. The
+  model is zaydlang's (`multiplication-algorithm`, zlib), translated in
+  `cpu/arm.rs` `booth_carry`. **Never port from NanoBoyAdvance** (GPL-3.0).
 - **BIOS read protection is a latch in the bus** (`MemoryBus::bios_latch`):
-  `Cpu::step` refreshes it from the prefetch whenever PC < 0x4000, the HLE
-  SWI path sets 0xE3A02004 (after SWI) / 0xE129F000 (SoftReset), and the IRQ
-  stub's real return prefetch word 0xE55EC002 now sits at 0x144. Not in save
-  states (refreshed by the next SWI/IRQ). This also makes gba-suite's
-  `bios.gba` pass, so `gba_suite_bios` is no longer ignored.
-- **CpuSet/CpuFastSet copy nothing from a source below 0x02000000**, and
-  16-bit CpuSet from an odd source stores the `ldrh`-rotated halfword.
-- **ROM past its end reads `(address >> 1) & 0xFFFF` per halfword**, CPU and
-  DMA alike (the DMA reads through the bus). An unaligned `ldr` from SRAM
-  reads the addressed byte replicated (`read32_rotated` skips the align for
-  the 8-bit save bus).
+  refreshed from the prefetch while PC < 0x4000; the HLE SWI path sets
+  0xE3A02004 (0xE129F000 for SoftReset); the IRQ stub's return prefetch word
+  0xE55EC002 sits at 0x144. This made gba-suite's `bios.gba` pass.
+- CpuSet/CpuFastSet copy nothing from a source below 0x02000000; 16-bit
+  CpuSet from an odd source stores the `ldrh`-rotated halfword. ROM past its
+  end reads `(address >> 1) & 0xFFFF` per halfword. An unaligned `ldr` from
+  SRAM reads the byte replicated.
 
-## 2026-10-07 - SIO R/W 90/90, SIO timing 4/4, Misc. edge cases 6/12
+### 2026-10-07 - SIO 90/90 and 4/4, Misc. edge cases 6/12
 
-Branch `fix/mgba-suite-sio-misc`. mGBA suite 5135 -> 5208/6998; no other
-sub-suite moved. Suite source (MIT): codeload.github.com/mgba-emu/suite.
+- **The misc-edge suite's SRAM log has got/expected swapped**: "Got X vs Y"
+  there means X = hardware.
+- **SIO registers**: mode is RCNT bits 14-15 (GP/JOY), else SIOCNT bits
+  12-13. SIODATA32 writable only in 32-bit normal mode; SIOCNT stores
+  `& 0x7F8F` and reads idle pins (normal 0x04, multi 0x0C, UART empty 0x20);
+  RCNT stores `& 0xC1FF`; JOYCNT bits 0-2 write-1-to-clear. `tests/sio.rs`
+  embeds the 90-row table.
+- **Only a normal-mode internal-clock transfer completes without a cable**:
+  bits x 64 cycles (256 KHz) or x 8 (2 MHz), then data all ones, IRQ 7.
+- **HLE `Halt` charges `HALT_RETURN_CYCLES = 30` after the wake**, fitted and
+  sharp (29 and 31 fail).
+- **DMA repeat reloads the count from DMAxCNT_L.** **DISPSTAT's H-Blank flag
+  rises at line cycle 1006**; the IRQ, HBlank DMA and line draw stay at 960.
+- Left: "DMA Prefetch" (2 cells) needs a DMA inside a load and a cycle-exact
+  ROM loop; "H-blank bit" Flip 1-3 wants a wake ~35 cycles later, and a
+  1235-vs-1232 delta between identical halts is unexplained.
 
-- **The misc-edge suite's SRAM log has got/expected swapped**: its
-  `runMiscEdgeSuite` calls `doResult(name, test, expected, actual)`, so
-  "Got X vs Y" there means X = hardware, Y = ours. Every other sub-suite
-  logs the right way round.
-- **SIO registers** (`MemoryBus::sio_store`/`io_byte`/`sio_mode`): the mode
-  is RCNT bits 14-15 (GP/JOY) else SIOCNT bits 12-13. SIODATA32 is writable
-  only in 32-bit normal mode, 0x124-0x127 never; SIOCNT stores `& 0x7F8F` and
-  reads the idle pins (normal SI = 0x04, multi SI|SD = 0x0C, UART receive
-  empty = 0x20); UART SIODATA8 reads 0; RCNT stores `& 0xC1FF` and its bits
-  0-3 read the idle pins (normal 0x5 | SIOCNT bit 3, JOY 0xC, multi/UART 0xF,
-  GP the stored bits); JOYCNT bits 0-2 are write-1-to-clear, bit 6 R/W;
-  JOY_RECV/JOY_TRANS read 0. Test `tests/sio.rs` embeds the 90-row table.
-- **Only a normal-mode internal-clock transfer completes without a cable**
-  (`MemoryBus::apply_sio_write`/`tick_sio`): bits x 64 cycles (256 KHz) or
-  x 8 (2 MHz), then start bit clears, data becomes all ones (SI high), IRQ 7.
-  Multiplayer, UART and external clock never finish (hardware times out too).
-  `sio_cycles` is in save state v9.
-- **HLE `Halt` charges `bios::HALT_RETURN_CYCLES = 30` after the wake** (the
-  BIOS epilogue the HLE skips; IntrWait's equivalent is 45). Fitted to the
-  four SIO timing rows, sharp (29 and 31 fail all four). That test cannot
-  separate a halt return cost from a transfer start latency.
-- **DMA repeat reloads the count from DMAxCNT_L**, not the enable-edge latch.
-- **DISPSTAT's H-Blank flag rises at line cycle 1006** (GBATEK states it);
-  the IRQ, HBlank DMA and line draw stay at 960.
-- **Left**: "DMA Prefetch" (2) needs an open-bus read to return the last DMA
-  value when the DMA lands inside the load, and a cycle-exact ROM loop to
-  hit the hardware break address. "H-blank bit" Hblank/Flip 1-3 (4): Flip 1
-  wants the wake ~35 cycles later (an HBlank IRQ near cycle 995-1002, as
-  mGBA has it, would do it but moves DMA/render timing too), and the
-  1235-vs-1232 delta between two identical halts has no explanation yet.
+### 2026-10-08 - Wait states, prefetch, DMA stalls: Timing 236 -> 1880/2020 (#69, #71)
 
-## 2026-10-08 - Wait states, prefetch, DMA stalls: Timing 236 -> 1880/2020
+Design and decisions in `docs/research/wait-states-design.md`.
 
-Branch `fix/wait-states`, design `docs/research/wait-states-design.md`. mGBA
-suite 5208 -> 6852/6998; no other sub-suite moved, Timer IRQ 90, count-up
-936 and SIO timing 4 held without re-fitting (IWRAM/BIOS stay 1 cycle).
-
-- **Cycle accounting**: decoders return their data + internal cycles,
-  `Cpu::step` adds the opcode fetch (pc + 2L) and one central refill (N+S at
-  the target) whenever PC was written. Costs come from
-  `MemoryBus::access_cycles` over a 256-entry table (`memory/timing.rs`)
-  rebuilt by `set_waitcnt` (store, reset, save-state load). Measured traps:
-  a running total kept in a struct field cost ~7% per frame on Mario Tennis
-  (store-forwarding chain), a boxed table ~3%, and a second `match op` at the
-  end of THUMB `format4_alu` ~6% (it broke the jump table). The refactor was
-  proven neutral by hashing every step's (PC, cycles) over 1500 frames of
-  eight ROMs against the base build.
-- **Fixed counts (were wrong before)**: THUMB hi-register ops (`nop` =
-  `mov r8, r8`) cost 3 whatever they did (`thumb.rs` format 5); register-
-  offset stores and `push` one too many; `pop {pc}` had no refill; the first
-  half of `bl` cost 3; multiplies ignored `m`; shifts by register had no I.
-- **Rules from the suite's table, not GBATEK** (all in tests/timing.rs):
-  the opcode fetch after any data access is N (after a refill it is S); a
-  load samples I/O after its opcode fetch, so `TMxCNT_L` is published ahead
-  by the next fetch's cost (`Timer::counters(fetch)`, 1 in IWRAM = the old
-  fit). Prefetch buffer (`cpu/prefetch.rs`): fills one halfword per S16 on
-  every cycle the CPU leaves the GamePak bus; a buffered fetch is 1 cycle,
-  ARM included if the second half is ready by the end of that cycle; an
-  in-flight halfword costs what it has left; a GamePak data access stops and
-  empties it and pays +1 if the halfword in flight had exactly 1 cycle left;
-  LDM/POP's I cycle comes after the transfers. DMA: 2N + 2(n-1)S + 2I, with
-  the write sequential between two GamePak ends (GBATEK's 4I does not fit);
-  the stall lands after the next instruction when that one's fetch is 1
-  cycle (start latency 2); a GamePak DMA pays the same +1 handover but
-  leaves the buffer intact, evaluated after any RAM read that precedes it.
-- **Left**: the 140 BIOS Div/Sqrt/ArcTan/CpuSet cells (real BIOS body cost,
-  declined). Games now get hardware CPU speed: Mario Tennis 142.5k -> 84k
-  steps/frame (-20% host cost), Yggdra +10% host cost per frame. Celeste
-  first draws on frame 12, not before 8 (`tests/ppu.rs` render runs 30).
-- **The suite's SRAM log stops at 0x8000 bytes** (`savprintf` in its
-  `main.c`), which is why it cut off in the multiply tests; the old probe
-  read 64 KiB but the log is 32 KiB. `temp/tprobe` finds savprintf's static
-  `location` in RAM and rewinds it to read the whole timing log.
-
-
-## 2026-10-08 - Phase 4.5 review: DMA stall placement, HALT, timer wrap, suite gate
-
-Branch `fix/phase-4-5-review`. Suite unchanged at 6852/6998; frame buffers
-of Mario Tennis, Yggdra and Celeste identical after 1500 frames.
-
-- **Corrects the entry above**: the "stall lands after the next instruction
-  when its fetch is 1 cycle" rule now applies to *immediate* DMAs only.
-  HBlank, VBlank and sound transfers run by a step's ticks are resolved at
-  the end of that same step (`Gba::step`, the `loop` after `post_tick`): the
-  machine is ticked through the stall right there, which can start more
-  transfers. They used to be charged one or two instructions late, and their
-  prefetch handover read the buffer after the wrong instruction.
-- `Gba::take_dma_stall` is the one place a stall is consumed; a GamePak DMA
-  (`stall_gamepak`) also sets `cpu.fetch_n`, so the next ROM opcode fetch
-  the buffer does not hold is N. NanoBoyAdvance goes further (`bus.cc`:
-  *any* DMA makes the next CPU ROM access N); no hardware table here
-  separates the two, and the mGBA DMA timing rows cannot - their DMAs are
-  enabled by a store, which already makes the next fetch N.
-- The halted path clears stalls **after** `post_tick`: the sound FIFO
-  refills run there, and a refill on the waking step was charged to the
-  first instruction after the wake (~30 cycles).
-- `Timer::counter_after` wraps modulo the period (`0x10000 - reload`); it
-  wrapped once, so reload 0xFFFF published 0x0007 over a 9-cycle fetch.
+- **Cycle accounting**: decoders return data + internal cycles; `Cpu::step`
+  adds the opcode fetch and one central refill (N+S at the target) whenever
+  PC was written. Costs come from a 256-entry table (`memory/timing.rs`)
+  rebuilt by `set_waitcnt` on store, reset and save-state load. Measured
+  traps: a running total in a struct field cost ~7% (store-forwarding chain),
+  a boxed table ~3%, and a second `match op` in THUMB `format4_alu` ~6% (it
+  broke the jump table). The refactor was proven neutral by hashing every
+  step's (PC, cycles) over 1500 frames of eight ROMs.
+- **Fixed counts**: THUMB hi-register ops cost 3 whatever they did; register-
+  offset stores and `push` one too many; `pop {pc}` had no refill; multiplies
+  ignored `m`; register shifts had no I.
+- **Rules from the suite's table, not GBATEK** (`tests/timing.rs`): the opcode
+  fetch after a data access is N (after a refill, S); a load samples I/O
+  after its opcode fetch, so `TMxCNT_L` is published ahead by the next
+  fetch's cost. Prefetch (`cpu/prefetch.rs`): fills one halfword per S16 on
+  every cycle the CPU leaves the GamePak bus; a buffered fetch is 1 cycle; a
+  GamePak data access empties it and pays +1 if the halfword in flight had 1
+  cycle left; LDM/POP's I cycle comes after the transfers. DMA:
+  2N + 2(n-1)S + 2I (GBATEK's 4I does not fit).
+- **Stall placement**: an *immediate* DMA's stall lands after the next
+  instruction when that one's fetch is 1 cycle (start latency 2). HBlank,
+  VBlank and sound DMAs are resolved at the end of the step that started them
+  (`Gba::step`, the loop after `post_tick`). `Gba::take_dma_stall` is the one
+  place a stall is consumed; a GamePak DMA also sets `cpu.fetch_n`. The halted
+  path clears stalls **after** `post_tick`, or the waking step's FIFO refill
+  is charged to the first instruction after the wake.
+- `Timer::counter_after` wraps modulo the period (`0x10000 - reload`).
+- Games now get hardware CPU speed: Mario Tennis 142.5k -> 84k steps a frame,
+  Yggdra +10% host cost. Celeste first draws on frame 12.
 - Test traps: the FIFO requests a refill whenever it holds <= 16 bytes, so
-  one refill from empty leaves it still requesting - pre-fill a word to
-  isolate a single refill. DISPSTAT's HBlank flag rises at cycle 1006, the
-  HBlank DMA at 960: detect the DMA's step with `gba.ppu.hblank`.
-- `homebrew_suites.rs` `mgba_suite_does_not_regress` gates every sub-suite
-  on `MGBA_FLOOR` (raise a floor when a fix gains cells). Sub-suites run on
-  scoped threads: ~3 s release, ~47 s debug; skips without the ROM (CI).
+  pre-fill a word to isolate one refill; detect an HBlank DMA's step with
+  `gba.ppu.hblank`, not the DISPSTAT flag (1006 vs 960). The suite's SRAM log
+  stops at 0x8000 bytes (`savprintf`); `temp/tprobe` rewinds its `location`
+  to read the whole timing log.
+- `mgba_suite_does_not_regress` gates every sub-suite on `MGBA_FLOOR` (raise a
+  floor when a fix gains cells). ~3 s release, ~47 s debug.
 
-## 2026-10-08 - Phase 5 state-restore fixes: state v10 carries the ROM CRC-32
+### 2026-10-08 - Save state v10 carries the ROM CRC-32 (Phase 5)
 
-- **Save state v10** appends the CRC-32 (IEEE, `cart::crc32`, same value as
-  `java.util.zip.CRC32`) of the ROM, cached in `Cartridge::rom_crc` at
-  `from_bytes`. `restore_unchecked` checks it **last** and returns
-  `SaveStateError::DifferentRom`; the rollback undoes the parse. v6-v9 states
-  have no CRC and still load onto any ROM.
-- **Every tail-relative offset moved by 4.** The Phase 5 probes
-  (`temp/phase5/probes`) hard-code v9 tails (`len - 4 - 16 - 18`, `len - 38`);
-  against a v10 state they edit the wrong bytes and report false "ok"s.
-  Head-relative offsets (timer block 115453, APU blob length 511886,
-  `sample_accum` 511890) are unchanged. `core/tests/state_restore.rs` has
-  the current offsets as constants.
-- Restore now rejects what `tick`/`step` can never produce: `sample_accum >=
-  GBA_CLOCK`, NR10 `sweep_shift > 7`, timer counter/reload `> 0xFFFF`,
-  `cycles > 2^62`, and an EEPROM `count` at or past the end of its phase
-  (Opcode < 2, Address < effective addr bits, WriteData < 64, others == 0).
-  Counters with no tight legitimate bound (`length_counter`, envelope/sweep
-  ticks, `envelope_tick_counter`) saturate instead of being validated.
-- HLE BgAffineSet/ObjAffineSet cap r2 at `AFFINE_SET_MAX` (0x10000) and every
-  guest-address add in `bios.rs` wraps. (The identity-matrix stubs noted here
-  were real and broke Pokemon Emerald's sprites; fixed 2026-10-27, see below.)
+- v10 appends the CRC-32 of the ROM (`cart::crc32`, same as
+  `java.util.zip.CRC32`), cached in `Cartridge::rom_crc`. `restore_unchecked`
+  checks it **last** (`SaveStateError::DifferentRom`); the rollback undoes the
+  parse.
+- Every tail-relative offset moves when the tail grows. Probes that hard-code
+  tails edit the wrong bytes and report false "ok"s; `core/tests/state_restore.rs`
+  has the current offsets as constants.
+- Restore rejects what `tick`/`step` can never produce (`sample_accum >=
+  GBA_CLOCK`, `sweep_shift > 7`, timer values `> 0xFFFF`, `cycles > 2^62`, an
+  EEPROM `count` past its phase). Counters with no tight bound saturate.
+- HLE BgAffineSet/ObjAffineSet cap r2 at `AFFINE_SET_MAX` (0x10000), and every
+  guest-address add in `bios.rs` wraps.
 - JNI `nativeStateWrite`/`nativeSaveWrite` call the C ABI functions, so
   `guarded` lives in one place; `tests/jni_exports.rs` checks it by reading
-  `ffi.rs`, since the JNI block never compiles on the host.
+  `ffi.rs`.
 
-## 2026-10-11 - Building the Android app in a git worktree
+### 2026-10-11 - Building the Android app in a git worktree
 
 - A new worktree has an empty `android/app/src/main/cpp/rcheevos/` submodule
   and no `jniLibs`. Run `git submodule update --init
-  android/app/src/main/cpp/rcheevos` and copy
-  `android/app/src/main/jniLibs` from the main checkout (gitignored).
+  android/app/src/main/cpp/rcheevos` and copy `android/app/src/main/jniLibs`
+  from the main checkout (gitignored).
 - If CMake already configured against the empty submodule, delete
   `android/app/.cxx` and `android/app/build/intermediates/cxx`, or the link
-  fails with undefined `rc_client_*` symbols: the source glob was evaluated
-  empty and cached.
+  fails with undefined `rc_client_*`: the source glob was cached empty.
 - Never copy the main checkout's rcheevos folder in: its `.git` pointer file
   breaks every git command in the worktree.
 
-## 2026-10-11 - ROM folders are tree Uris or legacy paths (PR C, fix/saf-folders)
+### 2026-10-11 - ROM folders are tree Uris or legacy paths (fix/saf-folders)
 
-- `rom_folders` prefs hold a mix of document-tree Uri strings and absolute paths; both scan. A ROM id
-  is the document Uri `buildDocumentUriUsingTree(tree, docId)` (same builder in every scan, so keys
-  are stable). Re-picking exactly `primary:<rel>` replaces the path folder and re-keys LastPlayed and
-  Favorites by `rekeyedDocId` (`data/RomFolders.kt`, pure, JVM-tested).
-- What sits beside a document ROM (`.sav`, cover) is recorded by the scan into the in-memory
-  `RomSiblings` (`data/RomFolders.kt`), not queried per file. A missing key means "not scanned", NOT
-  "no .sav": `RomFiles.legacySaveFor` returns null then, and callers must skip the import, because
-  `importLegacySave` writes its marker when the legacy side is absent and a private save exists.
-- `importLegacySave(LegacySave, File)` takes the legacy side as size/mtime/bytes; a provider that
-  reports no SIZE is measured by reading, never treated as size 0 (0 means "not a save" and marks).
-- Unavailable tree folders are `RomFolderManager.unavailable` (a StateFlow set by each scan); the
-  folder is never auto-removed.
+- `rom_folders` prefs hold document-tree Uri strings and absolute paths; both
+  scan. A ROM id is `buildDocumentUriUsingTree(tree, docId)` (same builder in
+  every scan, so keys are stable). Re-picking exactly `primary:<rel>` replaces
+  the path folder and re-keys LastPlayed and Favorites by `rekeyedDocId`
+  (`data/RomFolders.kt`, JVM-tested).
+- What sits beside a document ROM (`.sav`, cover) is recorded by the scan into
+  `RomSiblings`. A missing key means "not scanned", NOT "no .sav":
+  `RomFiles.legacySaveFor` returns null and callers must skip the import,
+  because `importLegacySave` writes its marker when the legacy side is absent.
+- `importLegacySave` takes the legacy side as size/mtime/bytes; a provider that
+  reports no SIZE is measured by reading, never treated as 0.
+- Unavailable tree folders are `RomFolderManager.unavailable`; a folder is
+  never auto-removed.
 
-## 2026-10-12 - save import core (rust-engineer)
+### 2026-10-12 - Save import core
 
-- `Cartridge::load_save` 0xFF-fills the whole chip before copying, so a short file reads erased past
-  its end. Savestate restore goes through it too (with `save_data()`'s full-size buffer, except a
-  small-mode EEPROM's 512 bytes, whose unreachable upper 7.5 KB now restores as 0xFF).
-- `cart::save_fit(rom, len)` is the import size rule (exact chip size or +16 mGBA RTC footer;
-  EEPROM accepts 512 and 8192 whichever the header says). C `gbee_save_fit`, JNI static
+- `Cartridge::load_save` 0xFF-fills the whole chip before copying, so a short
+  file reads erased past its end. Save-state restore goes through it too.
+- `cart::save_fit(rom, len)` is the import size rule (exact chip size or +16
+  mGBA RTC footer; EEPROM accepts 512 and 8192). C `gbee_save_fit`, JNI static
   `GbaEngine.nativeSaveFit`.
-- `core/tests/jni_exports.rs` only finds Kotlin externals on lines that START with `external fun` or
-  `private external fun`. Put `@JvmStatic` (or any annotation/modifier) on the line above, or the
-  export check silently skips that declaration.
+- `core/tests/jni_exports.rs` only finds Kotlin externals on lines that START
+  with `external fun` or `private external fun`. Put `@JvmStatic` on the line
+  above, or the export check silently skips the declaration.
 
-## 2026-10-14 - save state v11: live state between steps (rust-engineer)
+### 2026-10-14 - Save state v11: live state between steps (#94)
 
-- A save state is taken **between two `Gba::step` calls**, so anything a step leaves set for the
-  next one is machine state, however "transient" its comment says. v11 appends (43 bytes, after the
-  ROM CRC): PPU `cycle_counter`, `line_rendered`, the four affine `bg*_internal`, `io.intr_wait_active`,
-  `io.halt_swi`, `bus.bios_latch`, `cpu.entry_cycles`, `Gba::dma_stall`, `Gba::irq_since`
-  (`u64::MAX` = None). `load_state` no longer clears `irq_since`.
-- Derived, not saved: the PPU's DISPSTAT copies (`vcount_match`, three IRQ enables) - every tick
-  writes them into DISPSTAT, so `sync_dispstat_cache` re-reads them on every restore. v6-v10 states
-  get `cycle_counter` 960/0 from `hblank`, affine reloaded from BGxX/Y, the rest power-on values.
-- Deliberately still unsaved (ceiling: a few cycles once): `cpu.fetch_n`, the prefetch buffer,
-  `timer.start_delay` (1 cycle). `frame_start` is reset to `cycles` at load (matters only mid-slice).
-- `core/tests/state_resume.rs` has the generic check: save at every step boundary of a timer-IRQ
-  loop, restore into a fresh machine, compare the trace. Use it when adding cross-step state.
-- A layout change moves tail offsets in: `core/tests/state_restore.rs` (`LIVE_LEN`), `core/tests/saves.rs`
-  (absurd-length test, `- 43`), `savestate.rs` unit tests, and `StateTransfer.kt` `STATE_VERSIONS`.
+- A save state is taken **between two `Gba::step` calls**, so anything a step
+  leaves set for the next one is machine state, however "transient" its
+  comment says. v11 appends 43 bytes after the CRC: PPU `cycle_counter`,
+  `line_rendered`, the four affine `bg*_internal`, `io.intr_wait_active`,
+  `io.halt_swi`, `bus.bios_latch`, `cpu.entry_cycles`, `Gba::dma_stall`,
+  `Gba::irq_since` (`u64::MAX` = None).
+- Derived, not saved: the PPU's DISPSTAT copies, re-read by
+  `sync_dispstat_cache` on restore. v6-v10 states get `cycle_counter` from
+  `hblank`, affine reloaded from BGxX/Y, the rest power-on values.
+- Deliberately unsaved (ceiling: a few cycles once): `cpu.fetch_n`, the
+  prefetch buffer, `timer.start_delay`.
+- `core/tests/state_resume.rs` saves at every step boundary of a timer-IRQ
+  loop and compares traces. Use it when adding cross-step state.
+- A layout change moves tail offsets in `state_restore.rs` (`LIVE_LEN`),
+  `saves.rs` (absurd-length test), `savestate.rs` unit tests, and
+  `StateTransfer.kt` `STATE_VERSIONS`.
 
-## 2026-10-17 - Phase 5 boundary re-audit (rust-engineer)
+### 2026-10-17 - Phase 5 boundary re-audit
 
-- The v10 ROM CRC check only runs for `version >= 10` (`savestate.rs:416`), so a state whose version
-  field says 6..9 skips it; `StateTransfer.kt` imports any 6..11 state. Proven in
-  `temp/phase5/probes2/src/bin/boundary.rs`; details in `temp/phase5/rust-engineer.md` (P5-RE-1).
-- rcheevos achievement/leaderboard lists hold raw pointers into the loaded game and
-  `rc_client_unload_game` frees it after dropping its mutex: a list must be built *and read* under
-  the same lock that serialises unload (`RaEngine.coreLock`), or the strings are freed under it (P5-RE-2).
-- `nativeServerResponse` has no size cap in C and the body is not NUL-terminated; the 16 MiB cap is
-  Kotlin-only (`RaEngine.kt` `MAX_RESPONSE_BYTES`).
+- The v10 ROM CRC check only runs for `version >= 10` (`savestate.rs`), so a
+  state whose version field says 6..9 skips it; `StateTransfer.kt` imports
+  any 6..11 state (P5-RE-1, `temp/phase5/rust-engineer.md`).
+- rcheevos lists hold raw pointers into the loaded game and
+  `rc_client_unload_game` frees it after dropping its mutex: build *and read*
+  a list under the lock that serialises unload (`RaEngine.coreLock`) (P5-RE-2).
+- `nativeServerResponse` has no size cap in C and the body is not
+  NUL-terminated; the 16 MiB cap is Kotlin-only (`MAX_RESPONSE_BYTES`).
 
-## 2026-10-27 - Pokemon Emerald: affine sprites and PSG sound (rust-engineer)
+### 2026-10-27 - Pokemon Emerald: affine sprites and PSG sound (#112)
 
-- **ObjAffineSet/BgAffineSet were stubs** writing pa=0x100, pb=0 and never pc/pd. Emerald calls
-  SWI 0x0F every frame (r3 = 2, packed matrix) for every affine sprite, so Lotad in Birch's intro
-  and the starter picker drew with stack garbage as pc/pd (lines, smears). Now real: 1.14 sine
-  table, `asr #14`, pb negated after the shift (`bios.rs` `affine_matrix`). Tests in
-  `tests/bios.rs` (`obj_affine_set_*`, `bg_affine_set_*`). **BitUnPack (SWI 0x10) is still a stub**
-  (copies bytes until a zero) - same class of debt, unfixed.
-- **APU frame sequencer ran at 1702 Hz** (every 9856 cycles) for envelope, sweep and length alike.
-  Emerald's m4a uses the hardware envelope (step 1-2, decreasing) for its square-wave
-  instruments, so PSG notes died ~26x too fast. Now 512 Hz with length/sweep/envelope on steps
-  even/2,6/7; `envelope_tick_counter` reused as the position in the 8-step cycle (no layout change).
-- The mixer ignored SOUNDCNT_L (routing + master volume) and SOUNDCNT_H bits 0-1 (PSG 25/50/100%),
-  the wave channel was 2x the other PSGs, the mono output summed L+R instead of averaging, and a
-  square's duty left a DC offset (thumps). `tests/apu.rs` covers each. `savestate.rs` re-derives
-  the mixer from the latched SOUNDCNT_L/H after restore (`Apu::resync_mixer`), so older states
-  that stored the wrong decode still sound right; APU blob length unchanged.
-- **Comparing audio against mGBA works headless**: `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=disk
-  SDL_DISKAUDIOFILE=<abs path>.raw timeout 45 temp/mgba/run.sh <rom>` writes 44.1 kHz stereo s16
-  of the boot/intro/title (no input needed). Boot GBee for the same frames, compare 20 ms RMS
-  envelopes after aligning by cross-correlation. Emerald title: envelope correlation 0.665 before,
-  0.980 after. Scripts: `temp/emerald/scripts/cmp.py`, probe `temp/emerald/probe` (writes PNG with
-  no deps). Remaining gap: GBee has ~1.5-2x mGBA's energy above 6.4 kHz (point-sampled output, no
-  band-limiting), not addressed. `temp/mgba/run.sh` had the old GeeBeeAyy path; fixed.
+- **ObjAffineSet/BgAffineSet were stubs** writing pa=0x100, pb=0 and never
+  pc/pd. Emerald calls SWI 0x0F every frame (r3 = 2, packed matrix), so its
+  affine sprites drew with stack garbage as pc/pd. The docs had called them
+  "identity matrix" stubs, which understated it. Now real: 1.14 sine table,
+  `asr #14`, pb negated after the shift (`bios.rs` `affine_matrix`). The sine
+  table is computed, not read from a BIOS dump, and may be 1 LSB off on some
+  angles. Tests `obj_affine_set_*`, `bg_affine_set_*`.
+- **The APU frame sequencer ran at 1702 Hz** (every 9856 cycles) for envelope,
+  sweep and length. m4a uses the hardware envelope for square instruments, so
+  notes died ~26x too fast. Now 512 Hz, length/sweep/envelope on steps
+  even/2,6/7; `envelope_tick_counter` is the position in the 8-step cycle.
+  The Phase 1 APU ticks had been "verified" by tests that checked only trigger
+  and pitch.
+- The mixer ignored SOUNDCNT_L (routing, master volume) and SOUNDCNT_H bits
+  0-1, the wave channel was 2x the others, mono summed instead of averaging,
+  and a square's duty left a DC offset. `tests/apu.rs` covers each.
+  `Apu::resync_mixer` re-derives the mixer from latched SOUNDCNT_L/H after a
+  restore, so old states sound right.
+- **Comparing audio against mGBA works headless**: `SDL_VIDEODRIVER=dummy
+  SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=<abs path>.raw timeout 45
+  temp/mgba/run.sh <rom>` writes 44.1 kHz stereo s16 of the boot and title.
+  Compare 20 ms RMS envelopes after aligning by cross-correlation
+  (`temp/emerald/scripts/cmp.py`). Emerald title: correlation 0.665 -> 0.980.
 
-## 2026-10-27 - Baldur's Gate DA: bitmap modes ignored the BG2 enable (rust-engineer)
+### 2026-10-27 - Baldur's Gate DA: bitmap modes ignored the BG2 enable (#113)
 
-- `ppu/mod.rs` dispatched modes 3-5 without checking DISPCNT bit 10, so a bitmap was drawn with BG2
-  off. BG:DA's game-over and cutscene-text screens are mode 4 (DISPCNT 0x1B44) with BG2 off and the
-  text in sprites; VRAM held tile data, drawn full-screen as noise. Test:
-  `tests/ppu.rs::a_bitmap_mode_with_bg2_off_shows_the_backdrop`. mGBA gates the same way
-  (`video-software.c`, `TEST_LAYER_ENABLED(2)`).
-- Still approximate in the bitmap renderers (unfixed): BG2's affine PA-PD/BG2X/Y are ignored,
-  windows do not mask BG2, and BG2-vs-OBJ priority is not sorted (OBJ always on top).
-- Probe bins `temp/emerald/probe` take `ROM=<path>` now; `lines` logs PPU registers per scanline.
+`ppu/mod.rs` drew modes 3-5 without checking DISPCNT bit 10. BG:DA's game-over
+and cutscene-text screens are mode 4 with BG2 off and the text in sprites, so
+VRAM tile data was drawn full-screen as noise. Test
+`a_bitmap_mode_with_bg2_off_shows_the_backdrop`. mGBA gates the same way
+(`video-software.c`, `TEST_LAYER_ENABLED(2)`). Probe bins in `temp/emerald/probe`
+take `ROM=<path>`; `lines` logs PPU registers per scanline.
+
+### 2026-10-27 - PPU, APU and HLE BIOS bugs are found by players, not suites
+
+Every CPU, bus, timer and DMA bug since 2026-10-02 was caught by a test suite;
+every PPU, APU and HLE BIOS bug was found by someone playing a game. The free
+suites wired here have no PPU, APU or affine-set coverage. The audit by bug
+class, with what to test next, is
+[`docs/research/gba-bug-classes.md`](../docs/research/gba-bug-classes.md); the
+owned, prioritised list is `ROADMAP.md`, Known accuracy gaps. Durable facts
+from the 2026-10-27 core audit, each confirmed in code:
+
+- **FIFO samples are lost while the CPU is halted.** The halted branch of
+  `Gba::step` (`core/src/lib.rs:141-153`) runs `apu.tick(step)` before
+  `post_tick` drains timer overflows into `Apu::on_timer_overflow`
+  (`core/src/apu/mod.rs:577`), and halted steps reach 960 cycles because the
+  sound timer has no IRQ to bound them. Several overflows collapse into one
+  heard pop; a probe at 24 kHz heard 197 of 401 pops a frame.
+- **A PSG frequency-byte write retriggers the note.** The trigger bit stays
+  latched in `io_regs`, and `Gba::apu_sound_write`
+  (`core/src/lib.rs:439-458`) re-reads the whole halfword on every byte write,
+  so m4a's lone `strb` to the frequency low byte restarts the envelope.
+- **ROM-dependent tests are not pins.** `gba_suite`, `homebrew_suites`, the
+  ROM cases in `ppu.rs`, `integration.rs`, `input_slices.rs` and `tonerom.rs`
+  print "skipping" and **pass** when their ROM is missing from `temp/roms/` -
+  which it always is on a fresh clone and in CI. Behaviour that only those
+  tests cover is unpinned there.
+- An unhandled SWI is a silent no-op: `Cpu::swi` (`cpu/mod.rs`) discards
+  `handle_swi`'s result and logs nothing.
+
+**Application**: before calling a PPU, APU or BIOS feature done, find a test
+that pins it without a ROM, or compare against mGBA (screenshot or audio
+envelope). A known-gaps list without an owner, priority and affected games is
+where debt goes to sit.
