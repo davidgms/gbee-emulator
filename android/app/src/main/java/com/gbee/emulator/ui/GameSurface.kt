@@ -104,6 +104,19 @@ class GameSurfaceRenderer : SurfaceHolder.Callback {
         }
     }
 
+    /**
+     * The last frame as the surface shows it, or null before one exists. Taken once when the
+     * game screen starts leaving, so a Compose image can fade in the surface's place.
+     */
+    @Synchronized
+    fun snapshot(): Bitmap? {
+        val frame = last ?: return null
+        if (frame.size < GbaEngine.FRAME_BUFFER_SIZE || surfaceW == 0 || surfaceH == 0) return null
+        val out = Bitmap.createBitmap(surfaceW, surfaceH, Bitmap.Config.ARGB_8888)
+        paint(Canvas(out), upload(frame))
+        return out
+    }
+
     private fun upload(frame: ByteArray): Bitmap {
         for (i in pixels.indices) {
             val o = i * 3
