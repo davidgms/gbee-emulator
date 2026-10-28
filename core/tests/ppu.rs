@@ -1252,3 +1252,26 @@ fn the_hblank_flag_rises_at_cycle_1006_while_the_irq_still_fires_at_960() {
     ppu.tick(1, &mut bus, &mut dma);
     assert!(!flag(&bus), "the flag clears with the next line");
 }
+
+/// GBATEK, DISPCNT: modes 3-5 draw their bitmap as BG2, so bit 10 gates it
+/// like any other background. Baldur's Gate - Dark Alliance's game-over and
+/// cutscene-text screens sit in mode 4 with BG2 off and only sprites on top
+/// of the backdrop; drawing the bitmap anyway put whatever VRAM held - tile
+/// data - across the whole screen as noise.
+#[test]
+fn a_bitmap_mode_with_bg2_off_shows_the_backdrop() {
+    for mode in [3u16, 4, 5] {
+        let mut gba = Gba::new();
+        gba.load_rom(&vec![0u8; 0x200]).expect("ROM should load");
+        gba.bus.write16(0x0500_0000, 0x001F); // backdrop: red
+        gba.bus.write16(0x0500_0002, 0x7C00); // colour 1: blue
+        gba.bus.write16(0x0600_0000, 0x7C01); // blue in every mode's pixel 0
+        gba.bus.write16(0x0400_0000, 0x1B00 | mode); // BG0, BG1, BG3, OBJ; no BG2
+        gba.run_frame();
+        assert_eq!(
+            &gba.frame_buffer()[0..3],
+            [0xF8, 0x00, 0x00],
+            "mode {mode} drew BG2's bitmap with BG2 disabled"
+        );
+    }
+}

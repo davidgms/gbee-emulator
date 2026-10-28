@@ -619,9 +619,11 @@ impl Ppu {
         match self.bg_mode {
             0 => self.render_mode0_scanline(y, bus),
             1 | 2 => self.render_mode1_or_2_scanline(y, bus),
-            3 => self.render_mode3_scanline(y, bus),
-            4 => self.render_mode4_scanline(y, bus),
-            5 => self.render_mode5_scanline(y, bus),
+            // The bitmap is BG2, and DISPCNT bit 10 gates it like any other
+            // background: with it off only sprites and the backdrop remain.
+            3 if self.bg2_enable => self.render_mode3_scanline(y, bus),
+            4 if self.bg2_enable => self.render_mode4_scanline(y, bus),
+            5 if self.bg2_enable => self.render_mode5_scanline(y, bus),
             _ => {}
         }
 
