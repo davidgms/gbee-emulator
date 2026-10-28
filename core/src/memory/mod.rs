@@ -60,6 +60,11 @@ pub struct MemoryBus {
     pub(crate) sio_written: bool,
     /// What each CPU access costs, per region; see [`timing`].
     wait: timing::WaitTable,
+    /// Seconds to add to the host's UTC clock for the cartridge RTC: the
+    /// frontend's time zone, or whatever time the player set. Host
+    /// configuration, not machine state, so not in a save state and kept
+    /// across a reset or a new ROM.
+    pub(crate) rtc_offset: i64,
 }
 
 /// The BIOS read latch after boot or SoftReset: the opcode at [0x0DC+8].
@@ -99,6 +104,7 @@ impl MemoryBus {
             sio_cycles: 0,
             sio_written: false,
             wait: timing::WaitTable::from_waitcnt(0),
+            rtc_offset: 0,
         };
         bus.init_bios();
         // KEYINPUT is active low ("0=Pressed, 1=Released", GBATEK Keypad Input),
@@ -698,6 +704,7 @@ impl MemoryBus {
             0x0600_0000..=0x06FF_FFFF => self.vram[Self::vram_offset(address)] = value,
             0x0700_0000..=0x07FF_FFFF => self.oam[(address & 0x3FF) as usize] = value,
             0x0E00_0000..=0x0FFF_FFFF => self.cart.save_write(address, value),
+            0x0800_00C4..=0x0800_00C9 => self.gpio_store(address, value),
             _ => {}
         }
     }
@@ -739,6 +746,38 @@ impl MemoryBus {
 
     pub fn load_rom(&mut self, data: &[u8]) {
         self.rom = data.to_vec();
+    }
+
+    /// A store to the cartridge GPIO port. Out of line and cold: `store8`
+    /// is on every CPU store, and inlining this into it slowed every frame.
+    #[cold]
+    #[inline(never)]
+    fn gpio_store(&mut self, address: u32, value: u8) {
+        let offset = self.rtc_offset;
+        self.cart
+            .gpio_write(address, value, || host_utc_seconds() + offset);
+        self.sync_gpio_window();
+    }
+
+    /// Show the GPIO port in the bus's copy of the ROM at 0x080000C4-C9
+    /// while the game has it readable, and the cartridge's own bytes
+    /// otherwise (GBATEK, GBA Cart I/O Port). Every change to what the port
+    /// reads comes from a store to it, so patching after each store is exact
+    /// and leaves the ROM read path - every opcode fetch - untouched; a
+    /// check there cost 9% of a frame. mGBA keeps the port in its ROM buffer
+    /// the same way.
+    pub(crate) fn sync_gpio_window(&mut self) {
+        let Some(window) = self.rom.get_mut(0xC4..0xCA) else {
+            return;
+        };
+        for (i, byte) in window.iter_mut().enumerate() {
+            let address = 0x0800_00C4 + i as u32;
+            *byte = if self.cart.gpio_readable() {
+                self.cart.gpio_read(address)
+            } else {
+                self.cart.read(address & 0x01FF_FFFF)
+            };
+        }
     }
 
     /// Cycles a CPU access to `address` costs: a halfword or byte, or a
@@ -819,4 +858,17 @@ impl MemoryBus {
     pub fn oam_data_mut(&mut self) -> &mut [u8] {
         &mut self.oam
     }
+}
+
+/// The host's clock, in seconds since 1970 UTC. The RTC reads it only when a
+/// game asks for the time; 0 if the host clock is before 1970.
+fn host_utc_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Seconds the RTC must add to the host clock to show `local_unix_secs` now.
+pub(crate) fn rtc_offset_for(local_unix_secs: i64) -> i64 {
+    local_unix_secs.saturating_sub(host_utc_seconds())
 }

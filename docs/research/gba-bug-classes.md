@@ -48,11 +48,11 @@ count as pins.
 | DMA.timing | 12 | 1 | 7 | impl (atomic transfers); video capture absent | `dma_stalls_the_cpu_as_on_hardware` et al. | low |
 | TIMER | 0 | 0 | 6 | impl | `timer_count_up_matches_the_mgba_suite` et al. | low |
 | CPU.* | 0 | 0 | 12 | impl | `cpu.rs`, `gba_suite.rs` gate | low |
-| BIOS.swi-* | 10 | 2 | 9 | affine sets impl; BitUnPack stub; RegisterRamReset approx; 0x03, 0x0D, 0x13, 0x1A-0x2A absent and silent | `bios.rs` (math table, decompressors, affine) | high |
+| BIOS.swi-* | 10 | 2 | 9 | affine sets, BitUnPack, HuffUnComp, GetBiosChecksum, MidiKey2Freq, RegisterRamReset impl (2026-10-28); 0x03, 0x1A-0x1E, 0x20-0x2A absent, logged once per number | `bios.rs` (math table, decompressors, affine, `bit_unpack_*`, `huff_uncomp_*`, `register_ram_reset_*`, `an_unhandled_swi_is_reported_once`) | med |
 | APU.fifo-dma | 10 | 3 | 2 | impl; refill polled at <=16 bytes; master-off does not reset FIFOs | `dma_sound_plays_at_the_rate_its_timer_overflows` | med |
-| APU.timer-tick | 4 | 0 | 1 | buggy: pops collapse while halted [PROBED] | coarse window only | high |
+| APU.timer-tick | 4 | 0 | 1 | impl (2026-10-28): each FIFO byte plays from its overflow's cycle, halted or in a DMA stall | `dma_sound_pops_every_overflow_while_the_cpu_is_halted`, `dma_sound_pops_every_overflow_during_a_long_dma` | low |
 | APU.mix-bias | 7 | 0 | 2 | approx: SOUNDBIAS never read | `the_psg_master_volume_scales_by_an_eighth_per_step`, `soundcnt_h_scales_the_psg` | med |
-| APU.psg-trigger | 1 | 0 | 0 | buggy: byte write to freq re-triggers [PROBED] | `a_psg_channel_can_actually_be_triggered` (start only) | high |
+| APU.psg-trigger | 1 | 0 | 0 | impl (2026-10-28): trigger is a write-only strobe | `a_frequency_low_byte_write_does_not_retrigger_the_channel`, `the_trigger_bit_is_write_only_on_every_psg_channel` | low |
 | APU.psg-env | 6 | 0 | 1 | approx: any CNT_H write reloads envelope; no DAC-off | `the_envelope_steps_at_64_hz` | med |
 | APU.psg-sweep | 4 | 0 | 1 | buggy: shift 0 writes freq back [PROBED] | none | med |
 | APU.status (SOUNDCNT_X bits 0-3) | 1 | 0 | 0 | absent (`io.rs:194` comment only) | none | med |
@@ -61,7 +61,7 @@ count as pins.
 | APU.resample / stereo | 5 | 3 | 1 | approx: point-sampled, mono `(L+R)/2` | `the_mono_output_averages_the_two_sides` (pins the gap) | med |
 | APU.m4a | 4 | 1 | 0 | runs natively; inherits timer-tick and trigger bugs | none at ROM level | high |
 | SAVE.* | 0 | 8 | 4 | SRAM/EEPROM impl; flash program overwrites (no AND); detection by string scan, no override DB | `saves.rs`, gba_suite save (ROM-gated) | med |
-| RTC / GPIO | 0 | 5 | 0 | absent (no GPIO code at 0x080000C4-C9) | none | high |
+| RTC / GPIO | 0 | 5 | 0 | RTC impl (2026-10-28, `cart/gpio.rs`); time writes dropped, no RTC IRQ; solar/gyro/rumble absent | `tests/rtc.rs` | med |
 | QUIRK | 8 | 4 | 3 | mixed | per item | low |
 
 Counts are lower bounds from tracker samples skewed toward mGBA; use them to
@@ -73,6 +73,17 @@ Ranked by games broken x severity x how invisible the failure is. GBATEK is
 https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 
 ### 1. FIFO samples lost while the CPU is halted (APU.timer-tick)
+
+**Fixed 2026-10-28.** `Timer::increment` records where in the slice timers 0
+and 1 overflowed (`sound_overflow_at`), and `Gba::tick_apu` renders the APU up
+to each overflow before popping the FIFO, on all three tick paths (running,
+halted, late DMA stall). The same collapse hit the running CPU during a long
+DMA stall, which the original write-up missed: a 320-word DMA3 per step left 34
+of ~401 sign changes. Correction to "Games" below: **Emerald never halts** -
+pokeemerald's `WaitForVBlank` busy-waits on `gMain.intrCheck` (0 halted steps
+measured over 600 frames) - so Emerald was hit through DMA stalls, not HALT.
+Tests: `apu.rs` `dma_sound_pops_every_overflow_while_the_cpu_is_halted` (196 ->
+401) and `dma_sound_pops_every_overflow_during_a_long_dma` (34 -> 401).
 
 - Symptom: grit and aliasing on DMA-sound music. Probe at 24 kHz: 401 FIFO pops
   per frame audible with the CPU running, 197 while halted.
@@ -90,6 +101,12 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 
 ### 2. Byte write to a PSG frequency register re-triggers the note (APU.psg-trigger)
 
+**Fixed 2026-10-28.** `Gba::apu_sound_write` masks bit 15 of SOUND1CNT_X,
+SOUND2CNT_H, SOUND3CNT_X and SOUND4CNT_H unless the byte written is the high
+byte with bit 7 set, and clears the bit from `io_regs` after use. mGBA 0.10.4
+has the same fix. Tests: `apu.rs` `a_frequency_low_byte_write_does_not_retrigger_the_channel`,
+`the_trigger_bit_is_write_only_on_every_psg_channel`.
+
 - Symptom: m4a PSG vibrato and pitch bends restart the note and its envelope.
   Probe: envelope decayed to 0, one `write8(0x04000064)`, volume back at 14-15.
 - Where: `core/src/memory/mod.rs:664` keeps the write-only trigger bit in
@@ -103,6 +120,18 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 - Failing test (to write): `core/tests/apu.rs`: `a_frequency_low_byte_write_does_not_retrigger_the_channel`.
 
 ### 3. RTC and cartridge GPIO absent (RTC)
+
+**Fixed 2026-10-28** (RTC only). `core/src/cart/gpio.rs`: detection by game
+code (AXV, AXP, BPE, U3I, U32, U33, BR4, BKA) or `SIIRTC_V`; GPIO data,
+direction and control; S-3511 reset, control, date/time and time, bits LSB
+first with the command's fixed code in the low nibble (mGBA #1721). Power-on
+control 0x40. Time is the host clock plus an offset the frontend sets with
+`Gba::set_rtc_time` / `gbee_set_rtc_time` / JNI `nativeSetRtcTime`; date and
+time writes are dropped, no RTC IRQ. The readable port is patched into the
+bus's ROM copy so opcode fetches pay nothing. Save state v12 carries the block.
+Tests: `core/tests/rtc.rs` (5), `savestate.rs` `a_version_11_state_still_loads_with_a_set_up_rtc`,
+`a_hostile_rtc_state_is_rejected`. Boktai's solar sensor, gyro and rumble are
+still absent.
 
 - Symptom: Ruby/Sapphire/Emerald show "The internal battery has run dry"; berries,
   tides, Shoal Cave and daily events never happen. Boktai solar sensor, gyro and
@@ -118,6 +147,13 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   (enable GPIO at 0x080000C8, send 0x63 over the 3-wire protocol, assert a valid status byte).
 
 ### 4. Unhandled SWIs are silent no-ops (BIOS.swi-*)
+
+**Fixed 2026-10-28.** `bios::report_unhandled` warns once per SWI number.
+Added GetBiosChecksum (0x0D), BitUnPack (0x10, was a stub), HuffUnComp (0x13,
+4- and 8-bit), MidiKey2Freq (0x1F, single precision as mGBA). Still absent:
+0x03 Stop, 0x1A-0x1E, 0x20-0x2A. Tests: `bios.rs` `an_unhandled_swi_is_reported_once`,
+`get_bios_checksum_returns_the_gba_value`, `bit_unpack_*` (2),
+`huff_uncomp_*` (2), `midi_key2freq_returns_the_gbatek_formula`.
 
 - Symptom: a call to an absent SWI returns with r0-r3 unchanged and no log line.
   Huffman assets become blank memory, MidiKey2Freq returns its input as a pitch,
@@ -136,6 +172,11 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   `bit_unpack_expands_1bpp_to_4bpp_with_offset`.
 
 ### 5. RegisterRamReset wipes the stack (BIOS.swi-RegisterRamReset)
+
+**Fixed 2026-10-28.** Keeps IWRAM 0x7E00-0x7FFF, always forces DISPCNT =
+0x0080, and bits 5-7 reset the SIO, sound and other registers through the bus
+(register lists as mGBA). Tests: `bios.rs` `register_ram_reset_keeps_the_last_0x200_bytes_of_iwram`,
+`register_ram_reset_resets_the_io_register_groups`.
 
 - Symptom: bit 1 clears all 32 KB of IWRAM, including the stack and the IRQ
   vector at 0x03007FFC; a caller that pushed LR before `swi 1` returns to 0.
@@ -165,7 +206,7 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 | 14 | FIFO: refill polled at <=16 bytes, not on request; master-off does not reset; overflow behaviour unmodelled | `lib.rs:383-401`, `dma.rs:340` | B#5 mGBA #1847 (7-word ring, reset on overflow), B#2 SkyEmu #61, B#3 NBA #101 (Beyblade) | `apu.rs: a_fifo_overflow_empties_the_fifo` |
 | 15 | Save detection by string scan, no override DB; flash program overwrites instead of AND | `cart/mod.rs:680`, :406 | C class 3: libretro/mgba #136, Lemuroid #815, mGBA #2862 | `saves.rs: flash_program_can_only_clear_bits` |
 | 16 | Mono output and point-sampled resampling (panning lost, high-note aliasing) | `apu/mod.rs:707-826`, :820 | B#44 (blip-buf, NBA sinc); but see section 4 on noise | `apu.rs: a_channel_routed_left_only_is_silent_on_the_right` (replace the mono-pinning test first) |
-| 17 | MidiKey2Freq (0x1F) and GetBiosChecksum (0x0D) absent | `bios.rs:9-33` | B#54 mGBA `_MidiKey2Freq` formula | `bios.rs: midi_key2freq_returns_the_gbatek_formula` |
+| 17 | **Fixed 2026-10-28** (see item 4): MidiKey2Freq (0x1F) and GetBiosChecksum (0x0D) absent | `bios.rs:9-33` | B#54 mGBA `_MidiKey2Freq` formula | `bios.rs: midi_key2freq_returns_the_gbatek_formula` |
 | 18 | Affine BG reference reloads only when BGxX/Y changes; HBlank tables rewriting the same value keep accumulating | `ppu/mod.rs:406` | GBATEK "BG Rotation/Scaling" (internal ref regs); C mGBA #190 Madden | `ppu.rs: rewriting_bg2x_with_the_same_value_reloads_the_reference` |
 
 Low, not ranked: OBJ cycle budget (A: Gunstar Super Heroes, Metroid ZM, Drill

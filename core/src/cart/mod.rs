@@ -1,5 +1,14 @@
 use thiserror::Error;
 
+mod gpio;
+pub(crate) use gpio::STATE_LEN as GPIO_STATE_LEN;
+
+/// The GPIO block of a cart whose RTC a game has set up, for a save state
+/// from before v12.
+pub(crate) fn fresh_gpio_state() -> [u8; GPIO_STATE_LEN] {
+    gpio::Gpio::new().state()
+}
+
 #[derive(Error, Debug)]
 pub enum CartError {
     #[error("Invalid ROM size: {0} bytes")]
@@ -55,6 +64,8 @@ pub struct Cartridge {
     /// a state from another ROM - a hack sharing its original's header - is
     /// refused instead of replacing this cart's battery save.
     rom_crc: u32,
+    /// The GPIO port and its real-time clock, on the carts that have one.
+    gpio: Option<gpio::Gpio>,
 }
 
 /// CRC-32 (IEEE, the zip/`java.util.zip.CRC32` one), table built at compile
@@ -118,6 +129,7 @@ impl Cartridge {
             eeprom_addr_bits: None,
             eeprom_large: false,
             rom_crc: crc32(&[]),
+            gpio: None,
         }
     }
 
@@ -174,6 +186,7 @@ impl Cartridge {
             eeprom_addr_bits: None,
             eeprom_large: save_type == SaveType::Eeprom8k,
             rom_crc: crc32(data),
+            gpio: gpio::has_rtc(data).then(gpio::Gpio::new),
         })
     }
 
@@ -198,6 +211,54 @@ impl Cartridge {
         let b2 = self.read(address + 2) as u32;
         let b3 = self.read(address + 3) as u32;
         b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+    }
+
+    /// Whether the cartridge has a real-time clock on its GPIO port.
+    pub fn has_rtc(&self) -> bool {
+        self.gpio.is_some()
+    }
+
+    /// Whether a read of 0x080000C4-0x080000C9 answers from the GPIO port
+    /// rather than the ROM.
+    pub(crate) fn gpio_readable(&self) -> bool {
+        self.gpio.as_ref().is_some_and(gpio::Gpio::readable)
+    }
+
+    pub(crate) fn gpio_read(&self, address: u32) -> u8 {
+        self.gpio.as_ref().map_or(0, |g| g.read(address))
+    }
+
+    /// A byte store to 0x080000C4-0x080000C9. `now` is the local time in
+    /// seconds since 1970, asked for only when the clock is read.
+    pub(crate) fn gpio_write(&mut self, address: u32, value: u8, now: impl FnOnce() -> i64) {
+        if let Some(g) = &mut self.gpio {
+            g.write(address, value, now);
+        }
+    }
+
+    /// The console was reset: the GPIO port powers down, the RTC keeps its
+    /// registers on its own battery.
+    pub(crate) fn power_cycle(&mut self) {
+        if let Some(g) = &mut self.gpio {
+            g.power_cycle();
+        }
+    }
+
+    /// The GPIO and RTC registers for a save state; zeros on a cart without.
+    pub(crate) fn gpio_state(&self) -> [u8; GPIO_STATE_LEN] {
+        self.gpio
+            .as_ref()
+            .map_or([0; GPIO_STATE_LEN], gpio::Gpio::state)
+    }
+
+    pub(crate) fn restore_gpio_state(
+        &mut self,
+        s: &[u8; GPIO_STATE_LEN],
+    ) -> Result<(), &'static str> {
+        match &mut self.gpio {
+            Some(g) => g.restore(s),
+            None => Ok(()),
+        }
     }
 
     pub fn title(&self) -> &str {

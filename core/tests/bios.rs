@@ -937,3 +937,215 @@ fn bg_affine_set_computes_the_matrix_and_the_start_point() {
     assert_eq!(bus.read32(DEST + 8) as i32, 0x1400);
     assert_eq!(bus.read32(DEST + 12) as i32, 0x1800);
 }
+
+// ---------------------------------------------------------------------------
+// SWI 0x01: RegisterRamReset
+// ---------------------------------------------------------------------------
+
+/// GBATEK, BIOS Reset Functions: bit 1 clears the 32K on-chip WRAM
+/// "excluding last 200h bytes" - the stack, the IRQ vector at 0x03007FFC and
+/// the BIOS flags. It cleared all of it, so a caller that pushed LR before
+/// `swi 1` returned to address 0.
+#[test]
+fn register_ram_reset_keeps_the_last_0x200_bytes_of_iwram() {
+    let mut bus = MemoryBus::new();
+    bus.iwram_data_mut()[0x100..].fill(0xAA);
+    let bus = run_swi_on(bus, 0x01, [0x02, 0, 0, 0]);
+    let iwram = bus.iwram_data();
+    assert!(
+        iwram[0x100..0x7E00].iter().all(|&b| b == 0),
+        "IWRAM below 0x7E00 must be cleared"
+    );
+    assert!(
+        iwram[0x7E00..].iter().all(|&b| b == 0xAA),
+        "the last 0x200 bytes of IWRAM must survive"
+    );
+}
+
+/// GBATEK: the function always forces blank (DISPCNT = 0x0080), bit 6 resets
+/// the sound registers (SOUNDBIAS back to 0x200) and bit 7 every register
+/// outside SIO and sound, with the affine matrices back to identity. Bits 5-7
+/// were ignored, so sound state survived a reset that should clear it.
+#[test]
+fn register_ram_reset_resets_the_io_register_groups() {
+    let mut bus = MemoryBus::new();
+    bus.write16(0x0400_0000, 0x1F40); // DISPCNT
+    bus.write16(0x0400_0008, 0x1234); // BG0CNT
+    bus.write16(0x0400_0020, 0x0055); // BG2PA
+    bus.write16(0x0400_0084, 0x0080); // SOUNDCNT_X
+    bus.write16(0x0400_0080, 0xFF77); // SOUNDCNT_L
+    bus.write16(0x0400_0088, 0x0000); // SOUNDBIAS
+    bus.write16(0x0400_0134, 0x0000); // RCNT
+
+    let bus = run_swi_on(bus, 0x01, [0x00, 0, 0, 0]);
+    assert_eq!(bus.io_read16(0x0400_0000), 0x0080, "always forced blank");
+    assert_eq!(bus.io_read16(0x0400_0008), 0x1234, "bit 7 clear: kept");
+    assert_eq!(bus.io_read16(0x0400_0084), 0x0080, "bit 6 clear: kept");
+
+    let mut bus = bus;
+    bus.write16(0x0400_0000, 0x1F40);
+    let bus = run_swi_on(bus, 0x01, [0xE0, 0, 0, 0]);
+    assert_eq!(bus.io_read16(0x0400_0000), 0x0080);
+    assert_eq!(bus.io_read16(0x0400_0008), 0, "BG0CNT");
+    assert_eq!(bus.io_read16(0x0400_0020), 0x0100, "BG2PA back to 1.0");
+    assert_eq!(bus.io_read16(0x0400_0084), 0, "SOUNDCNT_X");
+    assert_eq!(bus.io_read16(0x0400_0080), 0, "SOUNDCNT_L");
+    assert_eq!(bus.io_read16(0x0400_0088), 0x0200, "SOUNDBIAS");
+    assert_eq!(bus.io_read16(0x0400_0134), 0x8000, "RCNT");
+}
+
+// ---------------------------------------------------------------------------
+// Unhandled SWIs
+// ---------------------------------------------------------------------------
+
+/// Counts warnings that mention SWI 0x2A, the one number no test calls
+/// except the one below.
+struct SwiLog;
+static SWI_2A_WARNINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+impl log::Log for SwiLog {
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record) {
+        let text = record.args().to_string();
+        if record.level() == log::Level::Warn && text.contains("0x2A") {
+            SWI_2A_WARNINGS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    fn flush(&self) {}
+}
+static LOGGER: SwiLog = SwiLog;
+
+/// An SWI the HLE does not implement returned with r0-r3 unchanged and no
+/// trace at all, so a game that depended on it failed somewhere else and
+/// looked like a game bug. It is now a warning, once per SWI number so a
+/// game calling it every frame does not flood the log.
+#[test]
+fn an_unhandled_swi_is_reported_once() {
+    log::set_logger(&LOGGER).expect("only this test sets a logger");
+    log::set_max_level(log::LevelFilter::Warn);
+    run_swi(0x2A, [0; 4]);
+    run_swi(0x2A, [0; 4]);
+    assert_eq!(
+        SWI_2A_WARNINGS.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "SWI 0x2A must be reported exactly once"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SWI 0x0D GetBiosChecksum, 0x1F MidiKey2Freq
+// ---------------------------------------------------------------------------
+
+/// GBATEK, GetBiosChecksum: r0 = 0xBAAE187F on a GBA. mGBA also leaves
+/// r1 = 1 and r3 = 0x4000, which is what the real routine's loop ends with.
+#[test]
+fn get_bios_checksum_returns_the_gba_value() {
+    let (cpu, _) = run_swi(0x0D, [0, 0, 0, 0]);
+    assert_eq!(cpu.registers[0], 0xBAAE_187F);
+    assert_eq!(cpu.registers[1], 1);
+    assert_eq!(cpu.registers[3], 0x4000);
+}
+
+/// GBATEK, MidiKey2Freq: `[r0+4] / 2^((180 - r1 - r2/256) / 12)`. It was
+/// absent, so the m4a engine got its own WaveData pointer back as a pitch.
+#[test]
+fn midi_key2freq_returns_the_gbatek_formula() {
+    let key = 13379 * 1024;
+    let freq = |mk: u32, fp: u32| {
+        let mut bus = MemoryBus::new();
+        bus.write32(DATA + 4, key);
+        bus.write32(BASE, arm_swi(0x1F));
+        let mut cpu = Cpu::new();
+        cpu.registers[15] = BASE;
+        cpu.registers[13] = 0x0300_7F00;
+        cpu.registers[..3].copy_from_slice(&[DATA, mk, fp]);
+        cpu.step(&mut bus);
+        cpu.registers[0]
+    };
+    assert_eq!(freq(180, 0), key, "key 180 is the sample's own rate");
+    assert_eq!(freq(168, 0), key / 2, "an octave down halves it");
+    assert_eq!(freq(156, 0), key / 4);
+    let expected = (f64::from(key) / 2f64.powf((180.0 - 60.0 - 0.5) / 12.0)) as u32;
+    let got = freq(60, 128);
+    assert!(
+        got.abs_diff(expected) <= expected / 100_000 + 1,
+        "MidiKey2Freq(60, 128) = {got}, expected about {expected}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// SWI 0x10 BitUnPack, 0x13 HuffUnComp
+// ---------------------------------------------------------------------------
+
+/// Write `bytes` starting at `addr`.
+fn write_bytes(bus: &mut MemoryBus, addr: u32, bytes: &[u8]) {
+    for (i, &b) in bytes.iter().enumerate() {
+        bus.write8(addr + i as u32, b);
+    }
+}
+
+/// GBATEK, BitUnPack: r2 points at {u16 length, u8 source width, u8 dest
+/// width, u32 offset | zero-flag << 31}. Source units are taken LSB first
+/// from each byte, the offset is added to every non-zero unit (every unit
+/// with the zero flag), and the results are packed LSB first into words.
+/// The stub copied bytes until a zero one and ignored all of it.
+#[test]
+fn bit_unpack_expands_1bpp_to_4bpp_with_offset() {
+    const INFO: u32 = DATA + 0x100;
+    let mut bus = MemoryBus::new();
+    write_bytes(&mut bus, DATA, &[0xB1, 0x0F]);
+    bus.write16(INFO, 2);
+    write_bytes(&mut bus, INFO + 2, &[1, 4]);
+    bus.write32(INFO + 4, 1);
+    let bus = run_swi_on(bus, 0x10, [DATA, DEST, INFO, 0]);
+    // 0xB1 LSB first is 1,0,0,0,1,1,0,1 -> 2,0,0,0,2,2,0,2.
+    assert_eq!(bus.read32(DEST), 0x2022_0002);
+    assert_eq!(bus.read32(DEST + 4), 0x0000_2222);
+}
+
+#[test]
+fn bit_unpack_with_the_zero_flag_offsets_every_unit() {
+    const INFO: u32 = DATA + 0x100;
+    let mut bus = MemoryBus::new();
+    write_bytes(&mut bus, DATA, &[0x0F, 0x21]);
+    bus.write16(INFO, 2);
+    write_bytes(&mut bus, INFO + 2, &[4, 8]);
+    bus.write32(INFO + 4, 0x8000_0010);
+    let bus = run_swi_on(bus, 0x10, [DATA, DEST, INFO, 0]);
+    // Nibbles 0xF, 0x0, 0x1, 0x2, each + 0x10, one per byte.
+    assert_eq!(bus.read32(DEST), 0x1211_101F);
+}
+
+/// GBATEK, HuffUnComp: header (data bits, type 2, size), a tree-size byte,
+/// the tree (node: bits 0-5 offset, bit 7 node 0 is data, bit 6 node 1 is
+/// data; children at (addr & !1) + offset * 2 + 2), then 32-bit words read
+/// MSB first. Output units are packed LSB first into words. It was absent.
+///
+/// The tree here codes A = 0, B = 10, C = 11.
+fn huffman(bits: u32, symbols: [u8; 3], size: u32, stream: u32) -> MemoryBus {
+    let mut bus = MemoryBus::new();
+    bus.write32(DATA, (size << 8) | 0x20 | bits);
+    // Tree size byte 3: 8 bytes from DATA + 4, so the stream is aligned.
+    write_bytes(
+        &mut bus,
+        DATA + 4,
+        &[3, 0x80, symbols[0], 0xC0, symbols[1], symbols[2], 0, 0],
+    );
+    bus.write32(DATA + 12, stream);
+    run_swi_on(bus, 0x13, [DATA, DEST, 0, 0])
+}
+
+#[test]
+fn huff_uncomp_decodes_a_4bit_tree() {
+    // A B C A A C B A = 0 10 11 0 0 11 10 0, twelve bits.
+    let bus = huffman(4, [0x1, 0x2, 0xF], 4, 0b0101_1001_1100 << 20);
+    assert_eq!(bus.read32(DEST), 0x12F1_1F21);
+}
+
+#[test]
+fn huff_uncomp_decodes_an_8bit_tree() {
+    // A B C A = 0 10 11 0.
+    let bus = huffman(8, [0x41, 0x42, 0x43], 4, 0b010110 << 26);
+    assert_eq!(bus.read32(DEST), 0x4143_4241);
+}

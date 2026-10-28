@@ -17,7 +17,18 @@ pub struct Timer {
     /// Cycles a just-started timer waits before its first count; see
     /// `delay_start`. Transient, so not part of a save state.
     pub(crate) start_delay: [u32; 4],
+    /// Where in the slice `tick` was given timers 0 and 1 - the two DMA
+    /// sound can use - overflowed, in cycles from its start, and how many of
+    /// those are recorded. `Gba::tick_apu` plays each FIFO byte from there.
+    /// Consumed in the same step, so not part of a save state.
+    pub(crate) sound_overflow_at: [[u32; SOUND_OVERFLOWS]; 2],
+    pub(crate) sound_overflows: [usize; 2],
 }
+
+/// Overflows of one sound timer `tick` records per slice. A sound timer at
+/// 65 kHz overflows 16 times in a 4000-cycle DMA; any past this play at the
+/// slice's end, as before.
+pub(crate) const SOUND_OVERFLOWS: usize = 16;
 
 impl Default for Timer {
     fn default() -> Self {
@@ -38,6 +49,8 @@ impl Timer {
             tick_counters: [0; 4],
             overflow_flags: [0; 4],
             start_delay: [0; 4],
+            sound_overflow_at: [[0; SOUND_OVERFLOWS]; 2],
+            sound_overflows: [0; 2],
         }
     }
 
@@ -86,7 +99,7 @@ impl Timer {
                 }
                 elapsed += next;
                 self.tick_counters[i] = 0;
-                if self.increment(i, bus) && first_irq.is_none() {
+                if self.increment(i, elapsed, bus) && first_irq.is_none() {
                     first_irq = Some(elapsed);
                 }
             }
@@ -177,7 +190,8 @@ impl Timer {
     /// identical overflow handling, including cascading on to the next timer.
     ///
     /// Returns whether an IRQ was raised, by this timer or a cascade target.
-    fn increment(&mut self, i: usize, bus: &mut super::memory::MemoryBus) -> bool {
+    /// `at` is how far into the slice the count happens.
+    fn increment(&mut self, i: usize, at: u32, bus: &mut super::memory::MemoryBus) -> bool {
         self.counters[i] += 1;
 
         // Timer overflow at 0x10000 (16-bit counter)
@@ -186,12 +200,16 @@ impl Timer {
         }
         self.counters[i] = self.reloads[i];
         self.overflow_flags[i] += 1;
+        if i < 2 && self.sound_overflows[i] < SOUND_OVERFLOWS {
+            self.sound_overflow_at[i][self.sound_overflows[i]] = at;
+            self.sound_overflows[i] += 1;
+        }
 
         // Handle cascade to next timer. A cascade target only counts up while
         // it is itself enabled.
         let mut irq = false;
         if i < 3 && self.cascaded[i + 1] && self.enabled[i + 1] {
-            irq = self.increment(i + 1, bus);
+            irq = self.increment(i + 1, at, bus);
         }
 
         // GBATEK, GBA Interrupt Control: IF bits 3,4,5,6 are Timer 0,1,2,3

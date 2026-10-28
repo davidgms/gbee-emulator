@@ -40,3 +40,4 @@ here pointing at it.
 - **2026-10-17** - [Phase 5 boundary re-audit: v6-9 CRC bypass, rcheevos list UAF, response cap (project memory)](../../memory.md); probes2 replaces stale probes crate (see phase5 probes file)
 - **2026-10-27** - [Graphics bug: dump OAM affine params and audit HLE SWIs first](2026-10-27-check-hle-stubs-before-the-renderer.md); mGBA audio A/B via SDL disk driver (project memory)
 - **2026-10-27** - Baldur's Gate bitmap-mode BG2 gate; per-scanline register probe (project memory)
+- **2026-10-28** - [Top-5 risks: Emerald never halts, hot-path guards cost 5-9%, v12 GPIO block (project memory)](../../memory.md)

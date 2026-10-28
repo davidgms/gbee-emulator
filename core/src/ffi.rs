@@ -369,6 +369,24 @@ pub unsafe extern "C" fn gbee_set_interframe_blend(ptr: *mut c_void, on: i32) {
     handle.inner.set_interframe_blend(on != 0);
 }
 
+/// Set the cartridge real-time clock to `local_unix_secs`: the device's local
+/// wall-clock time as seconds since 1970-01-01 00:00 (UTC epoch seconds plus
+/// the time zone's offset). The clock runs with the host clock from there and
+/// the setting lasts across a reset and a new ROM; until it is called the
+/// clock shows UTC. Only an RTC cart (Pokemon Ruby, Sapphire, Emerald,
+/// Boktai) reads it.
+///
+/// # Safety
+/// `ptr` must be a valid handle from `gbee_create`.
+#[no_mangle]
+pub unsafe extern "C" fn gbee_set_rtc_time(ptr: *mut c_void, local_unix_secs: i64) {
+    if ptr.is_null() {
+        return;
+    }
+    let handle = unsafe { &mut *(ptr as *mut GbaHandle) };
+    handle.inner.set_rtc_time(local_unix_secs);
+}
+
 /// Size of the cartridge's battery save in bytes, or 0 if it has no save chip.
 ///
 /// # Safety
@@ -829,6 +847,16 @@ pub mod android {
         }
         let gba = unsafe { &mut *(handle as *mut GbaHandle) };
         gba.inner.set_interframe_blend(on != 0);
+    }
+
+    #[no_mangle]
+    pub extern "system" fn Java_com_gbee_emulator_engine_GbaEngine_nativeSetRtcTime(
+        _env: JNIEnv,
+        _class: JClass,
+        handle: jlong,
+        local_unix_secs: jlong,
+    ) {
+        unsafe { gbee_set_rtc_time(handle as *mut c_void, local_unix_secs) };
     }
 
     #[no_mangle]

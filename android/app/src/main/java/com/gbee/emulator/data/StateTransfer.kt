@@ -19,7 +19,7 @@ private val STATE_MAGIC = "GBAS".toByteArray(Charsets.US_ASCII)
  * cannot refuse another game's state and its battery save would replace this
  * game's.
  */
-internal val STATE_VERSIONS = 10..11
+internal val STATE_VERSIONS = 10..12
 
 /** Bytes [isGbeeState] needs: the magic and the little-endian version after it. */
 internal const val STATE_HEADER_BYTES = 8

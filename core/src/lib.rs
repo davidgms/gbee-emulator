@@ -92,6 +92,8 @@ impl Gba {
     /// to power-on.
     pub fn reset(&mut self) {
         self.bus.reset();
+        self.bus.cart.power_cycle();
+        self.bus.sync_gpio_window();
         self.cpu = Cpu::new();
         self.cpu.boot();
         // Interframe blending is a frontend display setting, not machine
@@ -141,7 +143,7 @@ impl Gba {
             self.ppu.tick(step, &mut self.bus, &mut self.dma);
             self.timer.tick(step, &mut self.bus);
             self.bus.tick_sio(step);
-            self.apu.tick(step);
+            self.tick_apu(step);
             self.cycles += step as u64;
 
             // The hardware does not stop for HALT, so neither can this. The
@@ -215,7 +217,7 @@ impl Gba {
             }
         }
         self.ppu.tick(cycles, &mut self.bus, &mut self.dma);
-        self.apu.tick(cycles);
+        self.tick_apu(cycles);
 
         self.post_tick();
 
@@ -236,7 +238,7 @@ impl Gba {
             let irq = self.bus.tick_sio(late);
             sio_irq = sio_irq.or(irq.map(|i| at + i));
             self.ppu.tick(late, &mut self.bus, &mut self.dma);
-            self.apu.tick(late);
+            self.tick_apu(late);
             self.post_tick();
         }
 
@@ -256,6 +258,50 @@ impl Gba {
         }
 
         (self.cycles - before) as u32
+    }
+
+    /// Run the APU through a slice the timers have just run through, playing
+    /// each DMA sound byte from the cycle its timer overflowed.
+    ///
+    /// The APU used to render the whole slice first and `post_tick` popped
+    /// the FIFOs afterwards, all at once, so of the overflows in one slice
+    /// only the last byte was ever heard. Slices are long while the CPU is
+    /// halted (up to 960 cycles) and when a DMA stalls it (thousands): at a
+    /// 700-cycle timer about half the bytes were lost halted, and nearly all
+    /// sign changes during a long DMA. Overflows past the recorded ones and
+    /// those of timers 2 and 3 still reach the APU in `post_tick`.
+    #[inline]
+    fn tick_apu(&mut self, cycles: u32) {
+        if self.timer.sound_overflows == [0, 0] {
+            self.apu.tick(cycles);
+        } else {
+            self.tick_apu_with_overflows(cycles);
+        }
+    }
+
+    /// `tick_apu` for a slice in which timer 0 or 1 overflowed. Out of line:
+    /// it runs a few hundred times a frame, the check before it on every
+    /// instruction.
+    #[inline(never)]
+    fn tick_apu_with_overflows(&mut self, cycles: u32) {
+        let [a, b] = std::mem::take(&mut self.timer.sound_overflows);
+        let at = self.timer.sound_overflow_at;
+        let (mut i, mut j, mut done) = (0, 0, 0);
+        while i < a || j < b {
+            let timer = if j >= b || (i < a && at[0][i] <= at[1][j]) {
+                0
+            } else {
+                1
+            };
+            let next = if timer == 0 { &mut i } else { &mut j };
+            let when = at[timer][*next].clamp(done, cycles);
+            *next += 1;
+            self.apu.tick(when - done);
+            self.apu.on_timer_overflow(timer as u8);
+            self.timer.overflow_flags[timer] -= 1;
+            done = when;
+        }
+        self.apu.tick(cycles - done);
     }
 
     /// The CPU cycles the DMA transfers since the last call stall it for.
@@ -436,24 +482,36 @@ impl Gba {
         }
     }
 
-    fn apu_sound_write(&mut self, offset: u32, _value: u8) {
+    fn apu_sound_write(&mut self, offset: u32, byte: u8) {
         let base = match offset {
             0x60..=0x81 | 0x84..=0x85 | 0x90..=0x9F => offset & !1,
             // FIFO writes are byte streams, not registers.
             0xA0..=0xA3 => {
-                self.apu.write_fifo_a(_value as i8);
+                self.apu.write_fifo_a(byte as i8);
                 return;
             }
             0xA4..=0xA7 => {
-                self.apu.write_fifo_b(_value as i8);
+                self.apu.write_fifo_b(byte as i8);
                 return;
             }
             0x82..=0x83 => 0x82,
             _ => return,
         };
         // The latched value: the APU needs the write-only bits (frequency,
-        // length, trigger) that a CPU read masks off.
-        let value = self.bus.io_read16(0x0400_0000 + base);
+        // length) that a CPU read masks off.
+        let mut value = self.bus.io_read16(0x0400_0000 + base);
+        // The PSG trigger (bit 15 of SOUND1CNT_X, SOUND2CNT_H, SOUND3CNT_X,
+        // SOUND4CNT_H) is a strobe, not state: only a write of 1 to that very
+        // bit restarts the channel. It used to stay latched, so m4a's lone
+        // `strb` to a frequency low byte - vibrato, pitch bends - restarted
+        // the note and its envelope (mGBA #3086, NanoBoyAdvance #389).
+        if matches!(base, 0x64 | 0x6C | 0x74 | 0x7C) {
+            value &= 0x7FFF;
+            if offset & 1 == 1 {
+                value |= u16::from(byte & 0x80) << 8;
+                self.bus.io_regs_data_mut()[offset as usize] &= 0x7F;
+            }
+        }
         self.apu.write_register(base, value);
     }
 
@@ -485,6 +543,16 @@ impl Gba {
     /// flicker hard on a modern panel without it.
     pub fn set_interframe_blend(&mut self, on: bool) {
         self.ppu.set_interframe_blend(on);
+    }
+
+    /// Set the cartridge clock to `local_unix_secs` - the local wall-clock
+    /// time as seconds since 1970-01-01 00:00 - from now on; it runs with the
+    /// host clock after that. The frontend calls it with the device's local
+    /// time, which is how the time zone reaches a core that has no notion of
+    /// one. Until then the clock shows UTC. Lasts across a reset and a new
+    /// ROM; only an RTC cart (Pokemon Ruby, Sapphire, Emerald, Boktai) reads it.
+    pub fn set_rtc_time(&mut self, local_unix_secs: i64) {
+        self.bus.rtc_offset = memory::rtc_offset_for(local_unix_secs);
     }
 
     pub fn frame_buffer(&self) -> &[u8; 240 * 160 * 3] {
