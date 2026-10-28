@@ -1511,3 +1511,14 @@ of Mario Tennis, Yggdra and Celeste identical after 1500 frames.
   0.980 after. Scripts: `temp/emerald/scripts/cmp.py`, probe `temp/emerald/probe` (writes PNG with
   no deps). Remaining gap: GBee has ~1.5-2x mGBA's energy above 6.4 kHz (point-sampled output, no
   band-limiting), not addressed. `temp/mgba/run.sh` had the old GeeBeeAyy path; fixed.
+
+## 2026-10-27 - Baldur's Gate DA: bitmap modes ignored the BG2 enable (rust-engineer)
+
+- `ppu/mod.rs` dispatched modes 3-5 without checking DISPCNT bit 10, so a bitmap was drawn with BG2
+  off. BG:DA's game-over and cutscene-text screens are mode 4 (DISPCNT 0x1B44) with BG2 off and the
+  text in sprites; VRAM held tile data, drawn full-screen as noise. Test:
+  `tests/ppu.rs::a_bitmap_mode_with_bg2_off_shows_the_backdrop`. mGBA gates the same way
+  (`video-software.c`, `TEST_LAYER_ENABLED(2)`).
+- Still approximate in the bitmap renderers (unfixed): BG2's affine PA-PD/BG2X/Y are ignored,
+  windows do not mask BG2, and BG2-vs-OBJ priority is not sorted (OBJ always on top).
+- Probe bins `temp/emerald/probe` take `ROM=<path>` now; `lines` logs PPU registers per scanline.

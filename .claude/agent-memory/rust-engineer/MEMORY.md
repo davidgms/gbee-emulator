@@ -39,3 +39,4 @@ here pointing at it.
 - **2026-10-17** - [Host-testing JNI-only ffi.rs logic: helper + old-behaviour red stage; audio buffer 8100](2026-10-17-testing-jni-only-logic-on-host.md)
 - **2026-10-17** - [Phase 5 boundary re-audit: v6-9 CRC bypass, rcheevos list UAF, response cap (project memory)](../../memory.md); probes2 replaces stale probes crate (see phase5 probes file)
 - **2026-10-27** - [Graphics bug: dump OAM affine params and audit HLE SWIs first](2026-10-27-check-hle-stubs-before-the-renderer.md); mGBA audio A/B via SDL disk driver (project memory)
+- **2026-10-27** - Baldur's Gate bitmap-mode BG2 gate; per-scanline register probe (project memory)
