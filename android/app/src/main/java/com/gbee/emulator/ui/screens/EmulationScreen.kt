@@ -1,6 +1,9 @@
 package com.gbee.emulator.ui.screens
 
 import com.gbee.emulator.R
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import com.gbee.emulator.ui.theme.LocalLeavingGame
 import androidx.compose.ui.res.stringResource
 import com.gbee.emulator.data.DisplaySettings
 import com.gbee.emulator.ui.RateTip
@@ -1307,10 +1310,29 @@ fun GbaScreen(
     LaunchedEffect(frames) {
         withContext(Dispatchers.Default) { frames.collect { renderer.draw(it) } }
     }
-    AndroidView(
-        factory = { context -> SurfaceView(context).apply { holder.addCallback(renderer) } },
-        modifier = Modifier.fillMaxSize(),
-    )
+    val leaving = LocalLeavingGame.current
+    val still = remember(leaving) { if (leaving) renderer.snapshot()?.asImageBitmap() else null }
+    // The SurfaceView ignores Compose alpha, so on the way out the still is
+    // laid over it and the surface is hidden only after the still has been
+    // drawn: removing the surface first showed one empty frame (a blink).
+    var surfaceHidden by remember { mutableStateOf(false) }
+    LaunchedEffect(still) {
+        if (still != null) {
+            withFrameNanos { }
+            withFrameNanos { }
+            surfaceHidden = true
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { context -> SurfaceView(context).apply { holder.addCallback(renderer) } },
+            update = { it.visibility = if (surfaceHidden) android.view.View.INVISIBLE else android.view.View.VISIBLE },
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (still != null) {
+            Image(bitmap = still, contentDescription = null, modifier = Modifier.fillMaxSize())
+        }
+    }
 }
 
 /**

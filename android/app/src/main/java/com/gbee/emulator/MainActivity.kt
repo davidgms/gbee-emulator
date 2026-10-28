@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.gbee.emulator.ui.theme.LocalControlFontScale
+import androidx.compose.animation.EnterExitState
+import com.gbee.emulator.ui.theme.LocalLeavingGame
 import com.gbee.emulator.ui.theme.LocalControlPalette
 import com.gbee.emulator.ui.theme.LocalDpadCardinalHalf
 import com.gbee.emulator.data.DisplaySettings
@@ -55,6 +57,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+@OptIn(androidx.compose.animation.ExperimentalAnimationApi::class)
 fun GBeeNavHost() {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -179,6 +182,7 @@ fun GBeeNavHost() {
             }
 
             CompositionLocalProvider(
+                LocalLeavingGame provides (transition.targetState == EnterExitState.PostExit),
                 LocalControlPalette provides controlTint.palette,
                 LocalControlFontScale provides controlFont.scale,
                 LocalDpadCardinalHalf provides dpadCardinal,

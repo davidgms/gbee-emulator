@@ -155,3 +155,9 @@ val LocalDpadCardinalHalf = staticCompositionLocalOf { 30f }
  * stop short of that.
  */
 val LocalGlobalControlScale = staticCompositionLocalOf { 1f }
+
+/**
+ * True while the game screen is fading out of the nav graph. A SurfaceView ignores Compose
+ * alpha, so the picture swaps itself for a plain image that fades with the rest.
+ */
+val LocalLeavingGame = staticCompositionLocalOf { false }
