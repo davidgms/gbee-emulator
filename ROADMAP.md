@@ -153,7 +153,9 @@ GBATEK is wrong here (#19).
 
 ## Phase 4 - Review, test, and measure on a real phone
 
-- [x] **Whole-codebase code review**, every finding verified before acting.
+- [x] **Whole-codebase code review**, every finding verified before acting:
+      agent reviews reported confident bugs that were not there, and the
+      verification is the part that matters.
       Fixed in #43 to #48. Of what it left open: homebrew downloads got a hash
       and size cap (#77) and then went with the downloader (#90); wait states
       landed in #69; APU volume and routing in #112; the iOS bridge is out of
@@ -267,7 +269,7 @@ a class of games; **P3** rare or subtle. All are `core/` work, owned by
 | 2 | **A PSG frequency-byte write retriggers the note.** The trigger bit stays latched and every byte write re-decodes the whole register (`Gba::apu_sound_write`). | P1 | Every m4a game's PSG vibrato and pitch bends, *Emerald* included |
 | 3 | **No RTC** (no GPIO at `0x080000C4`). | P1 | *Pokemon Ruby/Sapphire/Emerald* (dead battery, no clock events), Boktai |
 | 4 | **`BitUnPack` (SWI 0x10) is a stub**: copies bytes until a zero, ignores the unpack parameters. | P1 | Games that expand 1bpp fonts or icons |
-| 5 | **Modes 1-5 have no per-pixel priority sort**: sprites always over BGs, the blend 2nd target is draw order, semi-transparent OBJs ignored. Fix together, as mode 0's sort (`ppu/mod.rs`, the `ponytail:` note). | P2 | Mode-1/2 overworlds and battle screens, Mode-7 racers |
+| 5 | **Modes 1-5 have no per-pixel priority sort**: sprites always over BGs, the blend 2nd target is draw order, semi-transparent OBJs ignored. Fix together, as mode 0's sort (`ppu/mod.rs`, the `ponytail:` note). | P2 | Mode-1/2 overworlds and battle screens, affine-BG games (*Madden 06/07*) |
 | 6 | **Affine OBJ texels truncate toward zero** where hardware floors. | P2 | Every scaled or rotated sprite (*Emerald* intro, evolution) |
 | 7 | **Bitmap BG2 ignores PA-PD and BG2X/Y**; mode 5 paints black outside 160x128. | P2 | Mode-5 FMV and scaled video, mode 3/4 scroll and shake |
 | 8 | **Ch1 sweep with shift 0 writes freq + freq back.** | P2 | Sweep sound effects (jump, laser, coin) |
@@ -277,6 +279,10 @@ a class of games; **P3** rare or subtle. All are `core/` work, owned by
 | 12 | **Envelope reloaded on any SOUNDxCNT_H write**, not only on trigger. | P3 | PSG notes whose duty changes mid-note |
 | 13 | **Mono output, point-sampled resampling** (1.5-2x mGBA's energy above 6.4 kHz). Stereo needs an FFI change. | P3 | Panning lost everywhere; harsh high notes |
 | 14 | **`MidiKey2Freq` (0x1F) and `GetBiosChecksum` (0x0D) absent.** | P3 | m4a builds that call the BIOS for pitch; anti-tamper checks |
+| 15 | **SOUNDCNT_X bits 0-3 (channel active) not modelled.** | P2 | Engines that poll them cut notes (*Minish Cap* unlock jingle) |
+| 16 | **FIFO refill polled at <=16 bytes, not on request; master-off does not reset it; overflow unmodelled.** | P2 | *Beyblade V-Force*, *Pac-Man World*, *Super Robot Wars J* |
+| 17 | **Affine BG reference reloads only when BGxX/Y changes value**, so HBlank tables rewriting the same value keep accumulating. | P3 | *Madden 06/07* |
+| 18 | **Flash byte-program overwrites instead of clearing bits only**; no save-type override list. | P3 | Games that rely on program-AND; mis-detected saves (*Tactics Ogre*) |
 
 Accepted simplifications, recorded so they are not rediscovered as bugs:
 

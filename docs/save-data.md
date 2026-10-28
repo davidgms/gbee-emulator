@@ -160,7 +160,10 @@ real (timers came back disabled, DMA-derived state stale, `io_regs` and the
 cart save absent, and a rejected restore left a hybrid of two machines - it
 now snapshots and rolls back); v4 added the APU; v8 the DMA latches (#65);
 v9 SIO (#68); v10 the ROM CRC-32; v11 the live between-step state (#94). The
-v10 and v11 paragraphs above describe what those two carry.
+v10 and v11 paragraphs above describe what those two carry. One v3 bug is
+worth keeping as a rule: `word_count` was derived from `transfer_type` before
+that field was restored, so derive fields only after every field they read
+is assigned.
 
 ## Still missing
 

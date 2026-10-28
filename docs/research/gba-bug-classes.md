@@ -85,7 +85,7 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   `-(280896 / pcmSamplesPerVBlank)`); B#1 mGBA #356 (FIFO phase vs timer is audible).
 - Games: nearly every commercial game (all park in VBlankIntrWait); Emerald and
   every m4a title first.
-- Failing test: `core/tests/apu.rs`: `dma_sound_pops_every_overflow_while_the_cpu_is_halted`
+- Failing test (to write): `core/tests/apu.rs`: `dma_sound_pops_every_overflow_while_the_cpu_is_halted`
   (timer at 700 cycles, DMA1 to FIFO A, CPU halted; sign flips == overflows +-1).
 
 ### 2. Byte write to a PSG frequency register re-triggers the note (APU.psg-trigger)
@@ -100,7 +100,7 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   B#29 NBA #389 (same sound, frequency writes during a note).
 - Games: every m4a game (CgbSound stores NRx3 as its own byte), Emerald and
   FireRed heal sound named externally.
-- Failing test: `core/tests/apu.rs`: `a_frequency_low_byte_write_does_not_retrigger_the_channel`.
+- Failing test (to write): `core/tests/apu.rs`: `a_frequency_low_byte_write_does_not_retrigger_the_channel`.
 
 ### 3. RTC and cartridge GPIO absent (RTC)
 
@@ -114,7 +114,7 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   stuck-night symptom itself is the hack's code), Lemuroid #1153 (Emerald save
   handling on an RTC cart), SkyEmu #183 (Boktai).
 - Games: Pokemon Ruby, Sapphire, Emerald (the project's headline game), Boktai 1-3.
-- Failing test: `core/tests/saves.rs`: `an_rtc_cart_answers_the_gpio_status_command`
+- Failing test (to write): `core/tests/saves.rs`: `an_rtc_cart_answers_the_gpio_status_command`
   (enable GPIO at 0x080000C8, send 0x63 over the 3-wire protocol, assert a valid status byte).
 
 ### 4. Unhandled SWIs are silent no-ops (BIOS.swi-*)
@@ -131,7 +131,7 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
   B#53 mGBA `bios.c` logs a STUB for each unimplemented call.
 - Games: Pokemon ROM hacks (Radical Red, Quetzal), text-heavy games using
   BitUnPack for 1bpp fonts, any title with Huffman data.
-- Failing tests: `core/tests/bios.rs`: `an_unhandled_swi_is_reported_once`
+- Failing tests (to write): `core/tests/bios.rs`: `an_unhandled_swi_is_reported_once`
   (needs a counter or test logger), then `huff_uncomp_decodes_a_4bit_tree` and
   `bit_unpack_expands_1bpp_to_4bpp_with_offset`.
 
@@ -148,18 +148,18 @@ https://problemkaputt.de/gbatek.htm, section named. Line numbers are at 81ff215.
 - Games: pokeemerald calls RegisterRamReset(RESET_ALL) at boot and survives only
   because its wrapper keeps LR in a register; any game calling it from C with LR
   on the stack crashes.
-- Failing test: `core/tests/bios.rs`: `register_ram_reset_keeps_the_last_0x200_bytes_of_iwram`.
+- Failing test (to write): `core/tests/bios.rs`: `register_ram_reset_keeps_the_last_0x200_bytes_of_iwram`.
 
 ### 6-18. Next tier
 
-| # | Risk | Where | External evidence | Failing test (file: name) |
+| # | Risk | Where | External evidence | Failing test to write (file: name) |
 |---|---|---|---|---|
 | 6 | OBJ vs BG priority ignored in modes 1-5 (sprites over foreground BGs, HUDs, bridges) | `ppu/mod.rs:636-645` | GBATEK "LCD OBJ - OAM Attributes" | `ppu.rs: mode1_a_low_priority_sprite_goes_behind_a_higher_priority_bg` |
 | 7 | Affine OBJ texel `/256` truncates toward zero; seam and 1 px shift on every scaled sprite | `ppu/mod.rs:1165-1172` | GBATEK "OAM Rotation/Scaling"; Emerald battle intro, evolution | `ppu.rs: an_affine_sprite_at_2x_maps_each_texel_to_two_pixels` |
 | 8 | BG2 affine regs ignored in modes 3-5 (mode 5 never scales full screen, FMVs) | `ppu/mod.rs:1313-1380` | A#22 mGBA #1668 Pinball Tycoon | `ppu.rs: mode3_honours_bg2x_scroll` |
 | 9 | SOUNDCNT_X bits 0-3 (channel active) not modelled; engines that poll them cut notes | `io.rs:194` | B#25 SkyEmu #315 Minish Cap unlock jingle | `apu.rs: soundcnt_x_reports_a_playing_channel_until_its_length_expires` |
 | 10 | Sweep shift 0 writes freq+freq back, kills the channel | `apu/mod.rs:874` | B#26 mGBA/NBA source agree: no write-back at shift 0 | `apu.rs: a_sweep_with_shift_zero_leaves_the_frequency_alone` |
-| 11 | Envelope reloaded by any SOUNDxCNT_H write (duty or length byte) | `apu/mod.rs:835`, writes :421, :472 | B#30 mGBA #866 (Metroid Fusion), CH 0.10.3 #3067 | `apu.rs: changing_the_duty_does_not_reset_the_envelope` |
+| 11 | Envelope reloaded by any SOUNDxCNT_H write (duty or length byte) | `write_duty_envelope` (`apu/mod.rs:472`, reloads at :485, :493) | B#30 mGBA #866 (Metroid Fusion), CH 0.10.3 #3067 | `apu.rs: changing_the_duty_does_not_reset_the_envelope` |
 | 12 | Windows do not mask BG2 in modes 3-5 | `ppu/mod.rs:1313-1380` | GBATEK "Window Feature" | `ppu.rs: win0_hides_the_bitmap_in_mode3` |
 | 13 | Semi-transparent OBJ flag dropped in modes 1-5 | `ppu/mod.rs:636-645` | A#18 mGBA #2489; C mGBA #3804 | `ppu.rs: a_semi_transparent_sprite_blends_in_mode1` |
 | 14 | FIFO: refill polled at <=16 bytes, not on request; master-off does not reset; overflow behaviour unmodelled | `lib.rs:383-401`, `dma.rs:340` | B#5 mGBA #1847 (7-word ring, reset on overflow), B#2 SkyEmu #61, B#3 NBA #101 (Beyblade) | `apu.rs: a_fifo_overflow_empties_the_fifo` |
@@ -256,7 +256,7 @@ from correlation 0.665 to 0.980), plus unit tests in `core/tests/apu.rs`.
    `ROADMAP.md` name the test that verifies them; a tick without a test is
    treated as unverified (see `.claude/memory.md` on the decoder bugs).
 4. A function whose body is a comment or a partial write is a missing feature
-   (memory.md, 2026-08-31). Audits grep for them.
+   (memory.md, 2026-08-28). Audits grep for them.
 5. Before a PPU or APU change is called done, run the matching test ROM from
    section 5 if present locally, or an mGBA screenshot/audio diff.
 
