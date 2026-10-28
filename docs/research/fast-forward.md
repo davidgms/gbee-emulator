@@ -1,70 +1,42 @@
 # How open-source emulators implement fast forward
 
-Research note, September 2026. Nothing here changes code; it is the evidence
-behind a design decision we still have to make.
+Research note, September 2026, and the decision it led to.
 
-The question it answers: our fast forward "is not smooth, it feels like slow
-motion with skipped frames". Every emulator surveyed below hits the same wall
-we did - the audio device is the thing pacing the emulator, and speeding up
-means deciding what happens to it - and there turn out to be only four
-distinct answers in the whole field.
+## Decision (taken, PRs #9 and #10, merged 2026-09-10)
 
-## What our code does today
+The first fast forward deleted the clock: it skipped the blocking audio write
+and ran open loop, which read as slow motion with dropped frames. Of the four
+strategies the survey below found (unthrottle, scale the wall clock, scale the
+audio clock, time stretch), GBee **scales the audio clock**, mGBA's ratio > 0
+path and Dolphin's default:
 
-Both files were read for this note; line numbers are from the current
-`feat/interframe-blending` tree.
+- `AudioOutput.write` with `WRITE_BLOCKING` stays the frame clock. While fast
+  forwarding, the loop runs `R` frames per batch and box-averages each run of
+  `R` samples down to one frame's worth, so the write blocks for exactly one
+  real frame period and the speed is an exact `R` until the CPU runs out.
+  Pitch rises by `R`. The sample buffer is sized from the maximum ratio
+  (`EmulationViewModel.kt`, `MAX_FAST_FORWARD_RATIO + 2` frames).
+- The core skips pixel work on frames nobody will see: `Gba::run_frames`
+  renders only the last frame of a batch (`ppu.set_render_enabled`,
+  `core/src/lib.rs`). Interframe blending skips the unrendered frames
+  (`Ppu`, `!self.render_enabled`).
+- The ladder is the player's: **2x, 4x, 8x and Unlimited**, default 2x
+  (`SettingsScreen.kt` `FastForwardRatios`, `DisplaySettings.kt`). Unlimited
+  keeps the free-running mode for seeking through cutscenes. A "mute during
+  fast forward" switch zeroes the samples but still writes them, because the
+  write is the clock.
+- Not taken: `AudioTrack.setPlaybackRate` (caps at 2x the native rate) and
+  `setPlaybackParams` (needs a buffer larger than `getMinBufferSize` times the
+  speed, which would give up the low-latency track). Doing the decimation in
+  Kotlin has neither limit.
+- Still open, not scheduled: VBA-M's AAudio backend replaces the long blocking
+  write with a queue-depth poll (500 us sleeps, 50 ms deadline). That would
+  remove the shutdown hazard `onCleared()` works around and make fast
+  forward's pacing `pace = !fastForwarding`, but it changes normal-speed
+  behaviour and needs its own branch and measurement.
 
-`android/app/src/main/java/com/gbee/emulator/viewmodel/EmulationViewModel.kt`:
-
-- `FAST_FORWARD_BATCH = 4` (line 90). While fast-forwarding the loop calls
-  `engine.runFrames(4)` (line 490) instead of `engine.runFrame()`.
-- One frame-buffer publish per batch: `_frameBuffer.value =
-  engine.getFrameBuffer().copyOf()` (line 494), a 115,200-byte allocation.
-- `engine.readAudio(audioSamples)` still runs every batch (line 506), so the
-  core's `sample_buffer` is drained and cleared, but the samples are thrown
-  away.
-- The loop then does `yield(); continue` (lines 530-532), skipping both
-  `audio.write` and `delayUntilDeadline`. There is no throttle of any kind.
-
-`android/app/src/main/java/com/gbee/emulator/engine/AudioOutput.kt`:
-
-- `SAMPLE_RATE = 48_000`, `BUFFERED_FRAMES = 2`, so the AudioTrack holds
-  1,600 samples, about 33 ms.
-- `write()` uses `AudioTrack.WRITE_BLOCKING` (line 118). That call is the
-  emulator's clock at normal speed.
-
-Three consequences follow directly, and together they are a complete
-explanation of the reported symptom:
-
-1. **Speed is whatever the device gives, and nothing more.** The comment at
-   line 148 already records the measurement: roughly 2.5x real time on a
-   phone. If a heavy scene drops that to 1.2x, fast forward delivers 1.2x.
-2. **Video cadence collapses.** At 1.2x the loop completes
-   `1.2 * 59.73 / 4 = 18` batches per second, so the screen is refreshed 18
-   times a second, in jumps of four emulated frames. Eighteen irregular
-   updates per second on a 60 or 120 Hz panel is exactly what "slow motion
-   with skipped frames" looks like. The four frames are all fully rendered by
-   the PPU, and three of the four are then discarded.
-3. **Audio is gone, and the AudioTrack is left running.** It underruns
-   immediately; nothing repopulates it until fast forward is released.
-
-Two smaller things found while reading, worth recording:
-
-- `audioSamples` is `SAMPLES_PER_FRAME * 8 = 6400` floats, but the core emits
-  `48000 / 59.7275 = 803.65` samples per frame, not 800. Eight frames is 6,429
-  samples, so a batch of 8 truncates. `gbee_audio_copy`
-  (`core/src/ffi.rs:190`) copies `min(len, max_samples)` and then clears the
-  whole buffer, so the overflow is silently dropped rather than corrupting
-  anything. Any batch size above 7 loses samples.
-- `GbaScreen` in
-  `android/app/src/main/java/com/gbee/emulator/ui/screens/EmulationScreen.kt:738`
-  converts all 38,400 pixels from RGB to ARGB and calls `Bitmap.setPixels` in
-  the composition phase, on the UI thread, once per published frame. Compose
-  coalesces recompositions to the display refresh, so publishing more often
-  than the display can present is pure waste, and publishing at an irregular
-  cadence is visible judder.
-
----
+Why the ratio is the player's choice, and why no single speed figure is quoted
+for the emulator, is in the measurements at the end.
 
 ## One section per emulator
 
@@ -658,7 +630,7 @@ Stated here only so it is clear what was *not* checked, rather than guessed at:
 1. **There are exactly four strategies, and every emulator picks one or two.**
    - *Unthrottle*: remove the clock entirely, run as fast as the CPU allows.
      RetroArch ratio 0, mGBA "unbounded", PPSSPP fast forward, BizHawk turbo,
-     Snes9x turbo, SkyEmu unlocked mode. This is what we do.
+     Snes9x turbo, SkyEmu unlocked mode.
    - *Scale the wall clock*: keep a deadline, divide the period by the
      multiplier. NanoBoyAdvance, Mesen, Dolphin, BizHawk fast forward.
    - *Scale the audio clock*: keep the audio device as the master and change
@@ -672,9 +644,7 @@ Stated here only so it is clear what was *not* checked, rather than guessed at:
    write becomes non-blocking and drops (Snes9x's `snd_pcm_nonblock(handle,
    1)`, PPSSPP's early return, VBA-M's `pace = false`, NanoBoyAdvance always),
    or the blocking behaviour is retained but the rate it blocks at is scaled
-   (mGBA, Dolphin). There is no third option, and doing neither - which is
-   what we do now, by not writing at all - is what leaves the device
-   underrunning.
+   (mGBA, Dolphin). There is no third option.
 3. **Video frames are skipped, and the skip is pushed into the core.** Snes9x
    `IPPU.RenderThisFrame`, SkyEmu `emu_state.render_frame` reaching
    `gba_tick_ppu`, BizHawk's `render` argument to `FrameAdvance`, RetroArch
@@ -704,180 +674,6 @@ Stated here only so it is clear what was *not* checked, rather than guessed at:
    hardest about it went for attenuation instead.
 
 ---
-
-## Recommendation for our architecture
-
-### The core problem, stated precisely
-
-`AudioOutput.write` with `WRITE_BLOCKING` is our clock. Fast forward has to
-answer one question: **do we keep that clock and speed it up, or do we drop it
-and build another one?** Right now we do neither - we delete the clock and run
-open loop - and that is the whole bug.
-
-Keeping it is strictly better for us, because it is the only option that needs
-no new timing code, cannot drift, and self-limits gracefully on a device that
-cannot reach the requested speed. This is mGBA's ratio > 0 path and Dolphin's
-default, and it is the one to copy.
-
-### The change, concretely
-
-**1. Make the fast-forward batch a real-time frame, and decimate its audio.**
-
-In `EmulationViewModel.startEmulation()`, replace the
-`if (fastForwarding) { yield(); continue }` escape at lines 530-532 with a
-normal `audio.write`, and add one decimation step. With a ratio `R`:
-
-- `engine.runFrames(R)` produces about `R * 803.65` samples in `audioSamples`.
-- Reduce them to about `803.65` by averaging each run of `R` consecutive
-  samples into one. Averaging rather than taking every Rth sample matters: a
-  plain decimation aliases the GBA's square waves into audible garbage, and a
-  box average is a cheap low-pass that costs one add per sample.
-- `audio.write(out, count / R)` then blocks for exactly one real frame period,
-  because the device drains 803.65 samples in that time.
-
-The throttle is now exact and automatic: the loop runs at `R` times real time
-and no faster, publishes the frame buffer once per real frame period (about
-60 times a second at any ratio), and `delayUntilDeadline` and
-`frameDeadlineNanos` stay exactly as they are for the no-audio-device fallback.
-No new clock, no `yield()` spin, no deadline arithmetic. The pitch goes up by
-`R`, which is what mGBA, Dolphin and RetroArch's speedup mode all sound like.
-
-Two details:
-
-- `audioSamples` is 6,400 floats and one frame is 803.65 samples, so it holds
-  7.96 frames. Raise it to `SAMPLES_PER_FRAME * 12` (or size it from the
-  maximum ratio) before allowing a ratio above 7, or the last frames of a
-  batch are silently truncated by `gbee_audio_copy`.
-- If the device cannot sustain `R`, the write simply stops being the
-  bottleneck and the speed settles at whatever the CPU gives, with the audio
-  underrunning. That is the same failure mode we have today, but it is now the
-  worst case rather than the only case.
-
-**2. Do not publish the frame buffer more than once per batch.** With the
-change above this is free: one batch is one real frame period. Keep line 494
-where it is. What must not happen is the current arrangement, where the
-publish rate is `speed * 59.73 / 4` and therefore both irregular and, at
-realistic speeds, well under the display refresh rate. Every emulator that
-looks smooth clamps presentation to the display; see PPSSPP's
-`FastForwardNeedsSkipFlip` and Dolphin's VI skip.
-
-**3. Give the frontend a way to say "do not render this frame".** This is the
-one part that belongs in `core/`, and it is the difference between fast
-forward that is capped by the PPU and fast forward that is capped by the CPU.
-Add a render flag to `Gba::run_frames` (or a `Gba::set_render_enabled`), plumb
-it through `gbee_run_frames` in `core/src/ffi.rs` and
-`nativeRunFrames`, and have the PPU skip pixel composition on frames the
-frontend will not show, exactly as SkyEmu passes `render` into
-`gba_tick_ppu` and BizHawk passes it into `FrameAdvance`. Only the last frame
-of each batch needs to be rendered.
-
-Two cautions specific to us. Our PPU now draws each scanline at its HBlank
-(commit 2d70336), so the skip has to be inside the per-scanline draw, not a
-"skip the frame" branch at the top. And interframe blending (commit 114d3ec)
-averages each frame with the one before it; if `R - 1` frames out of `R` are
-not rendered, blending would average frames `R` apart and smear badly.
-Blending should be bypassed while fast-forwarding, or fed only rendered
-frames.
-
-This step is optional for correctness and worth real speed. Ship steps 1 and 2
-first, measure, then decide.
-
-**4. Cap the speed and let the user pick it.** The comment at
-`EmulationViewModel.kt:148` argues that fixed 2x/4x/8x steps were dishonest
-because the device only reaches about 2.5x. With step 1 that argument
-inverts: a ratio is now a promise the audio clock enforces, and asking for 4x
-on a device that gives 2.5x degrades to 2.5x with underruns rather than
-lying. Suggested control, following NanoBoyAdvance's menu almost exactly:
-
-- **Default 2x.** It is NanoBoyAdvance's default and Azahar's, it is inside
-  the measured 2.5x headroom on the phone in question, and at 2x the audio is
-  still recognisable, which is what makes fast forward usable for grinding
-  and for skipping text.
-- Offer **2x, 3x, 4x** and an explicit **Unlimited** that restores today's
-  behaviour (no audio write, free-run). Keeping unlimited is worth it: mGBA,
-  RetroArch and BizHawk all keep an unbounded mode alongside the ratio for
-  seeking through long cutscenes.
-- Keep the button a toggle, as it is now. A separate held-vs-toggled ratio
-  (mGBA, NanoBoyAdvance) is a nice-to-have, not a first cut.
-- Add **"Mute during fast forward"**, default off. With decimated audio at 2x
-  the sound is informative rather than painful, so muting should be the user's
-  choice, not ours. If a single toggle feels thin, BizHawk's
-  `SoundVolumeRWFF = 50` (attenuate rather than mute) is the better idea and
-  costs one multiply.
-
-### On vsync and presentation on Android
-
-We do not present through vsync directly - the frame buffer goes into a
-`StateFlow`, and Compose recomposes `GbaScreen` on the UI thread, which is
-already Choreographer-paced. So vsync cannot fight the *emulation* speed the
-way it does in a desktop emulator with a swap-interval-blocked present. What
-it does do is silently discard work: every `_frameBuffer.value = ...` is a
-115,200-byte allocation and every recomposition converts 38,400 pixels and
-calls `Bitmap.setPixels` on the UI thread, so publishing faster than the
-display refresh burns CPU and allocator pressure for nothing. After step 1 the
-publish rate is one per real frame period, which is the correct amount.
-
-Worth knowing but not recommending: Android has two native ways to do the
-"scale the audio clock" trick in the device instead of in our code, and both
-are too constrained for us.
-
-- `AudioTrack.setPlaybackRate(int)` retunes the track's consumption rate, but
-  the framework source documents "The valid sample rate range is from 1 Hz to
-  twice the value returned by `getNativeOutputSampleRate(int)`"
-  ([AudioTrack.java, setPlaybackRate](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/media/java/android/media/AudioTrack.java)),
-  which caps us at 2x on a 48 kHz device.
-- `AudioTrack.setPlaybackParams(PlaybackParams)` supports arbitrary speeds in
-  principle, but the same source warns: "For speeds greater than 1.0f, the
-  AudioTrack buffer on configuration must be larger than the speed multiplied
-  by the minimum size `getMinBufferSize(...)`". Our track is deliberately
-  *smaller* than `getMinBufferSize` (1,600 samples against a measured 3,844;
-  see the comment in `AudioOutput.start()`), so this would throw
-  `IllegalArgumentException` unless we gave up the low-latency buffer. Not
-  worth it.
-
-Doing the decimation ourselves has neither limit and costs one pass over about
-1,600 floats per frame.
-
-### Worth considering later: stop using one long blocking write
-
-VBA-M's AAudio backend deliberately does not use a single blocking write. It
-polls the queue depth in 500 microsecond sleeps with a 50 ms deadline, with
-the comment that a long block "is both video judder and -- because it makes
-this producer bursty -- a cause of the very underruns it is meant to prevent",
-and that the deadline "keeps a stalled or stopped stream from wedging
-emulation". We have the same hazard in a sharper form: `onCleared()` already
-carries a 250 ms shutdown timeout and a comment about leaking the handle
-rather than releasing an AudioTrack under a live blocking write
-(`EmulationViewModel.kt:812-843`). Replacing the blocking write with a
-queue-depth poll would remove that hazard and make fast forward's pacing a
-one-line change (`pace = !fastForwarding`) rather than a resampling one. It is
-a bigger change than step 1 and should not be bundled with it, but it is the
-direction the one Android-native comparable in this survey chose.
-
----
-
-## Smallest change for us
-
-In order, with the cheapest first:
-
-1. **Decimate and write the audio during fast forward, batch = ratio.**
-   Roughly 15 lines in `EmulationViewModel.startEmulation()`, plus enlarging
-   `audioSamples`. No core change, no FFI change, no new timing code. This
-   alone fixes the reported symptom: the speed becomes an exact 2x, the frame
-   buffer is published about 60 times a second again instead of 18, and the
-   audio device stops underrunning. Everything else on this list is an
-   improvement on top of a fast forward that already works.
-2. **Turn `_fastForward: StateFlow<Boolean>` into a ratio** and add the
-   settings entries for the ratio and for mute-or-attenuate. UI work, no
-   engine work.
-3. **Add a render flag to `run_frames` and skip PPU pixel work on unshown
-   frames.** Real speed, and the only item that touches `core/`. Needs a test
-   in `core/tests/` proving a non-rendered frame leaves the frame buffer
-   untouched while registers, DMA, timers and audio still advance, per the
-   testing rule in `CLAUDE.md`.
-4. **Replace the blocking write with a queue-depth poll.** Larger, and it
-   changes normal-speed behaviour, so it deserves its own branch and its own
-   measurement.
 
 ## Measured afterwards, on the real device
 

@@ -18,7 +18,8 @@ formats. Revisit only if players ask for mGBA specifically.
   `gba.cycles`), and mGBA's scheduler timestamps for video, timers, DMA and
   the APU frame sequencer.
 - Biggest risk: a state taken while PC is inside the BIOS (IntrWait, LZ77,
-  CpuSet). Our HLE BIOS area is zeros except the IRQ stub at 0x128-0x13C, so
+  CpuSet). Our HLE BIOS area is mostly zeros (IRQ stub at 0x128-0x13C, plus the
+  epilogue at 0x28 and a prefetch word at 0x144 since #60/#67), so
   the BIOS frame would have to be unwound onto the game's SWI, or the game
   hangs. States inside a game IRQ handler work as-is (LR_irq = 0x138 matches
   our stub).
