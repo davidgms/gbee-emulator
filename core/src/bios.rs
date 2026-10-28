@@ -367,8 +367,9 @@ const AFFINE_SET_MAX: u32 = 0x1_0000;
 /// `sin(angle)` in 1.14 fixed point, for the upper byte of a BIOS angle
 /// (0x00-0xFF = one full turn).
 ///
-/// The real BIOS reads a 256-entry table of exactly these values; rounding
-/// the f64 sine reproduces it, and 0x40 lands on 0x4000.
+/// The real BIOS reads a 256-entry table instead. Rounding the f64 sine is
+/// not checked against a BIOS dump and may be one LSB off on some entries
+/// (1/256 px on an affine sprite); 0x40 lands on 0x4000.
 fn bios_sin(index: u32) -> i32 {
     let turn = f64::from(index & 0xFF) / 256.0 * std::f64::consts::TAU;
     (turn.sin() * 16384.0).round() as i32

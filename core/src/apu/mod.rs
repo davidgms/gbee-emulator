@@ -826,7 +826,9 @@ impl Apu {
             let out = sample - self.dc_in + DC_BLOCK_POLE * self.dc_out;
             self.dc_in = sample;
             self.dc_out = out;
-            self.sample_buffer.push(out);
+            // A full-scale step overshoots the high-pass to about +-2, and
+            // the FFI path hands this buffer to AudioTrack unclamped.
+            self.sample_buffer.push(out.clamp(-1.0, 1.0));
         }
     }
 
