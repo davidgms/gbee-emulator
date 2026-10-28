@@ -1274,12 +1274,13 @@ fn a_bitmap_mode_with_bg2_off_shows_the_backdrop() {
             "mode {mode} drew BG2's bitmap with BG2 disabled"
         );
 
-        // And with BG2 on, the same pixel is the bitmap's blue.
+        // And with BG2 on, the same pixel is the bitmap's blue (0x7C01 in
+        // modes 3 and 5 carries one step of red, so only blue is checked).
         gba.bus.write16(0x0400_0000, 0x1F00 | mode);
         gba.run_frame();
         assert_eq!(
-            &gba.frame_buffer()[0..3],
-            [0x00, 0x00, 0xF8],
+            gba.frame_buffer()[2],
+            0xF8,
             "mode {mode} hid BG2's bitmap with BG2 enabled"
         );
     }
