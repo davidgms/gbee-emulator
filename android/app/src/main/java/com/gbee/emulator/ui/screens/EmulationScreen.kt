@@ -1317,6 +1317,7 @@ fun GbaScreen(
     // drawn: removing the surface first showed one empty frame (a blink).
     var surfaceHidden by remember { mutableStateOf(false) }
     LaunchedEffect(still) {
+        surfaceHidden = false
         if (still != null) {
             withFrameNanos { }
             withFrameNanos { }

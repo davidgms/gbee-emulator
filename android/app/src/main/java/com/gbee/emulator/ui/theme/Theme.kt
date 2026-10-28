@@ -3,6 +3,7 @@ package com.gbee.emulator.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import com.gbee.emulator.data.ControlTint
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextStyle
@@ -160,4 +161,4 @@ val LocalGlobalControlScale = staticCompositionLocalOf { 1f }
  * True while the game screen is fading out of the nav graph. A SurfaceView ignores Compose
  * alpha, so the picture swaps itself for a plain image that fades with the rest.
  */
-val LocalLeavingGame = staticCompositionLocalOf { false }
+val LocalLeavingGame = compositionLocalOf { false }
