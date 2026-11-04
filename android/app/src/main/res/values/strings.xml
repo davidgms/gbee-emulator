@@ -234,13 +234,13 @@
     <string name="favorite">Favorite</string>
     <string name="folders_unavailable_banner">Folder unavailable: %1$s. Pick it again in Settings.</string>
     <string name="empty_title">No ROMs yet!</string>
-    <string name="empty_body">Go to Settings → ROM Folders to add your game folders.\n\nBzzt! Your games await!</string>
+    <string name="empty_body">Go to Settings → ROM Folders to add your game folders.</string>
     <string name="homebrew_title">Free games to try</string>
     <string name="homebrew_body">GBee comes with no games. These free homebrew games are legal to download and make testing quick. Any other GBA game works too.\n\nDownload a game, put it in a folder, then add that folder in Settings → ROM Folders.</string>
     <string name="homebrew_fighter">Shooter. Tests sprites, sound and speed.</string>
     <string name="homebrew_varooom">3D racing. Tests rotation and scaling.</string>
     <string name="homebrew_credit">Both by GValiente, free under CC BY-NC-SA 4.0. Tap a game to open its itch.io page.</string>
-    <string name="homebrew_link">Or try some free homebrew games</string>
+    <string name="homebrew_link">No games? Tap here to see free homebrew games</string>
     <string name="game_info_title">Game info</string>
     <string name="info_name">Name</string>
     <string name="ok">OK</string>

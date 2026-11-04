@@ -233,13 +233,13 @@
     <string name="favorite">お気に入り</string>
     <string name="folders_unavailable_banner">フォルダを利用できません:%1$s。設定で選び直してください。</string>
     <string name="empty_title">ROMがまだありません!</string>
-    <string name="empty_body">設定 → ROMフォルダでゲームのフォルダを追加しよう。\n\nブーン!ゲームが待ってるよ!</string>
+    <string name="empty_body">設定 → ROMフォルダでゲームのフォルダを追加しよう。</string>
     <string name="homebrew_title">お試し用の無料ゲーム</string>
     <string name="homebrew_body">GBeeにはゲームが入っていません。これらの無料ホームブリューゲームは合法にダウンロードでき、テストがすぐにできます。ほかのGBAゲームも使えます。\n\nゲームをダウンロードしてフォルダに入れ、設定 → ROMフォルダでそのフォルダを追加してください。</string>
     <string name="homebrew_fighter">シューティング。スプライト、音、速度をテスト。</string>
     <string name="homebrew_varooom">3Dレース。回転と拡大縮小をテスト。</string>
     <string name="homebrew_credit">どちらもGValiente作、CC BY-NC-SA 4.0で無料。ゲームをタップするとitch.ioのページが開きます。</string>
-    <string name="homebrew_link">または無料のホームブリューゲームを試す</string>
+    <string name="homebrew_link">ゲームがない?ここをタップして無料のホームブリューゲームを見る</string>
     <string name="game_info_title">ゲーム情報</string>
     <string name="info_name">名前</string>
     <string name="ok">OK</string>

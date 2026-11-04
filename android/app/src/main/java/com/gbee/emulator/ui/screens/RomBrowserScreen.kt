@@ -5,6 +5,7 @@ import com.gbee.emulator.ui.storageLabel
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -189,9 +190,8 @@ fun RomBrowserScreen(
         animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
         label = "reload",
     )
-    // Once per app start while no folder is picked: a new tester has
-    // nothing to play until they fetch a game.
-    var showHomebrew by rememberSaveable { mutableStateOf(RomFolderManager(context).getFolderPaths().isEmpty()) }
+    // Opened only from the empty state's link, never on its own.
+    var showHomebrew by rememberSaveable { mutableStateOf(false) }
     if (showHomebrew && roms.isEmpty()) HomebrewDialog { showHomebrew = false }
     var sortOrder by remember { mutableStateOf(RomSortOrder.LAST_PLAYED_DESC) }
     var sortMenuOpen by remember { mutableStateOf(false) }
@@ -881,7 +881,13 @@ fun EmptyState(modifier: Modifier = Modifier, onHomebrew: () -> Unit = {}) {
         )
 
         TextButton(onClick = onHomebrew, contentPadding = PaddingValues(0.dp)) {
-            Text(stringResource(R.string.homebrew_link), color = GoldenSaplight, fontSize = 14.sp)
+            Text(
+                stringResource(R.string.homebrew_link),
+                color = GoldenSaplight,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline,
+            )
         }
     }
 }

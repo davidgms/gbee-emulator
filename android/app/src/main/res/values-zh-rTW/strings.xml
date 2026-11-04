@@ -233,13 +233,13 @@
     <string name="favorite">最愛</string>
     <string name="folders_unavailable_banner">資料夾無法使用:%1$s。請在設定中重新選擇。</string>
     <string name="empty_title">還沒有 ROM!</string>
-    <string name="empty_body">前往 設定 → ROM 資料夾 新增你的遊戲資料夾。\n\n嗡嗡!你的遊戲在等你!</string>
+    <string name="empty_body">前往 設定 → ROM 資料夾 新增你的遊戲資料夾。</string>
     <string name="homebrew_title">免費試玩遊戲</string>
     <string name="homebrew_body">GBee 不含任何遊戲。這些免費自製遊戲可以合法下載,讓測試更快。其他 GBA 遊戲也可以。\n\n下載遊戲,放進資料夾,再到 設定 → ROM 資料夾 新增該資料夾。</string>
     <string name="homebrew_fighter">射擊遊戲。測試角色圖像、聲音和速度。</string>
     <string name="homebrew_varooom">3D 賽車。測試旋轉和縮放。</string>
     <string name="homebrew_credit">兩款皆由 GValiente 製作,以 CC BY-NC-SA 4.0 免費提供。點一下遊戲即可開啟 itch.io 頁面。</string>
-    <string name="homebrew_link">或試試免費自製遊戲</string>
+    <string name="homebrew_link">沒有遊戲?點這裡查看免費自製遊戲</string>
     <string name="game_info_title">遊戲資訊</string>
     <string name="info_name">名稱</string>
     <string name="ok">確定</string>

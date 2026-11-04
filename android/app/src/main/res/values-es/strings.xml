@@ -235,13 +235,13 @@
     <string name="favorite">Favorito</string>
     <string name="folders_unavailable_banner">Carpeta no disponible: %1$s. Vuelve a elegirla en Ajustes.</string>
     <string name="empty_title">¡Aún no hay ROM!</string>
-    <string name="empty_body">Ve a Ajustes → Carpetas de ROM para añadir las carpetas de tus juegos.\n\n¡Bzzt! ¡Tus juegos te esperan!</string>
+    <string name="empty_body">Ve a Ajustes → Carpetas de ROM para añadir las carpetas de tus juegos.</string>
     <string name="homebrew_title">Juegos gratis para probar</string>
     <string name="homebrew_body">GBee no incluye juegos. Estos juegos homebrew gratis son legales de descargar y hacen las pruebas más rápidas. Cualquier otro juego de GBA también funciona.\n\nDescarga un juego, ponlo en una carpeta y añade esa carpeta en Ajustes → Carpetas de ROM.</string>
     <string name="homebrew_fighter">Shooter. Prueba sprites, sonido y velocidad.</string>
     <string name="homebrew_varooom">Carreras 3D. Prueba rotación y escalado.</string>
     <string name="homebrew_credit">Ambos de GValiente, gratis bajo CC BY-NC-SA 4.0. Toca un juego para abrir su página de itch.io.</string>
-    <string name="homebrew_link">O prueba algunos juegos homebrew gratis</string>
+    <string name="homebrew_link">¿Sin juegos? Toca aquí para ver juegos homebrew gratis</string>
     <string name="game_info_title">Información del juego</string>
     <string name="info_name">Nombre</string>
     <string name="ok">Aceptar</string>

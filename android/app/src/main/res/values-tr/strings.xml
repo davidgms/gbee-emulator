@@ -234,13 +234,13 @@
     <string name="favorite">Favori</string>
     <string name="folders_unavailable_banner">Klasör kullanılamıyor: %1$s. Ayarlar\'dan yeniden seç.</string>
     <string name="empty_title">Henüz ROM yok!</string>
-    <string name="empty_body">Oyun klasörlerini eklemek için Ayarlar → ROM Klasörleri\'ne git.\n\nVızz! Oyunların seni bekliyor!</string>
+    <string name="empty_body">Oyun klasörlerini eklemek için Ayarlar → ROM Klasörleri\'ne git.</string>
     <string name="homebrew_title">Denemek için ücretsiz oyunlar</string>
     <string name="homebrew_body">GBee oyun içermez. Bu ücretsiz homebrew oyunları yasal olarak indirebilirsin ve testi hızlandırır. Diğer GBA oyunları da çalışır.\n\nBir oyun indir, bir klasöre koy, sonra o klasörü Ayarlar → ROM Klasörleri\'nden ekle.</string>
     <string name="homebrew_fighter">Nişancı. Sprite, ses ve hızı test eder.</string>
     <string name="homebrew_varooom">3D yarış. Döndürme ve ölçeklemeyi test eder.</string>
     <string name="homebrew_credit">İkisi de GValiente\'den, CC BY-NC-SA 4.0 ile ücretsiz. itch.io sayfasını açmak için bir oyuna dokun.</string>
-    <string name="homebrew_link">Ya da ücretsiz homebrew oyunları dene</string>
+    <string name="homebrew_link">Oyun yok mu? Ücretsiz homebrew oyunları görmek için buraya dokun</string>
     <string name="game_info_title">Oyun bilgisi</string>
     <string name="info_name">Ad</string>
     <string name="ok">Tamam</string>

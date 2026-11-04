@@ -233,13 +233,13 @@
     <string name="favorite">즐겨찾기</string>
     <string name="folders_unavailable_banner">폴더를 사용할 수 없음: %1$s. 설정에서 다시 선택하세요.</string>
     <string name="empty_title">아직 ROM이 없어요!</string>
-    <string name="empty_body">설정 → ROM 폴더에서 게임 폴더를 추가하세요.\n\n붕붕! 게임이 기다리고 있어요!</string>
+    <string name="empty_body">설정 → ROM 폴더에서 게임 폴더를 추가하세요.</string>
     <string name="homebrew_title">무료로 해볼 게임</string>
     <string name="homebrew_body">GBee에는 게임이 들어 있지 않아요. 이 무료 홈브루 게임은 합법적으로 받을 수 있고 테스트를 빠르게 해 줘요. 다른 GBA 게임도 돼요.\n\n게임을 받아 폴더에 넣고, 설정 → ROM 폴더에서 그 폴더를 추가하세요.</string>
     <string name="homebrew_fighter">슈팅. 스프라이트, 소리, 속도를 테스트해요.</string>
     <string name="homebrew_varooom">3D 레이싱. 회전과 확대/축소를 테스트해요.</string>
     <string name="homebrew_credit">둘 다 GValiente 제작, CC BY-NC-SA 4.0으로 무료. 게임을 누르면 itch.io 페이지가 열려요.</string>
-    <string name="homebrew_link">또는 무료 홈브루 게임 해보기</string>
+    <string name="homebrew_link">게임이 없나요? 여기를 눌러 무료 홈브루 게임을 보세요</string>
     <string name="game_info_title">게임 정보</string>
     <string name="info_name">이름</string>
     <string name="ok">확인</string>
