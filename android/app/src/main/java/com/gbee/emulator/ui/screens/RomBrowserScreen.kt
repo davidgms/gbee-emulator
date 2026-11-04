@@ -192,7 +192,7 @@ fun RomBrowserScreen(
     // Once per app start while no folder is picked: a new tester has
     // nothing to play until they fetch a game.
     var showHomebrew by rememberSaveable { mutableStateOf(RomFolderManager(context).getFolderPaths().isEmpty()) }
-    if (showHomebrew && !askCovers) HomebrewDialog { showHomebrew = false }
+    if (showHomebrew && roms.isEmpty()) HomebrewDialog { showHomebrew = false }
     var sortOrder by remember { mutableStateOf(RomSortOrder.LAST_PLAYED_DESC) }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
@@ -909,7 +909,7 @@ private fun HomebrewDialog(onDismiss: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { uriHandler.openUri(url) }
+                            .clickable { runCatching { uriHandler.openUri(url) } }
                             .background(Color.White.copy(alpha = 0.06f))
                             .padding(12.dp),
                     ) {

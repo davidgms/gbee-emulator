@@ -237,7 +237,7 @@
     <string name="empty_title">Nenhuma ROM ainda!</string>
     <string name="empty_body">Vá em Configurações → Pastas de ROMs para adicionar as pastas dos seus jogos.\n\nBzzt! Seus jogos esperam por você!</string>
     <string name="homebrew_title">Jogos grátis para testar</string>
-    <string name="homebrew_body">O GBee não vem com jogos. Estes jogos homebrew grátis são legais para baixar e deixam o teste rápido. Qualquer outro jogo de GBA também funciona.\n\nBaixe um jogo, coloque numa pasta e adicione essa pasta em Configurações → Pastas de ROMs.</string>
+    <string name="homebrew_body">O GBee não vem com jogos. Estes jogos homebrew grátis podem ser baixados legalmente e deixam o teste rápido. Qualquer outro jogo de GBA também funciona.\n\nBaixe um jogo, coloque numa pasta e adicione essa pasta em Configurações → Pastas de ROMs.</string>
     <string name="homebrew_fighter">Nave de tiro. Testa sprites, som e velocidade.</string>
     <string name="homebrew_varooom">Corrida 3D. Testa rotação e escala.</string>
     <string name="homebrew_credit">Os dois são de GValiente, grátis sob CC BY-NC-SA 4.0. Toque num jogo para abrir a página no itch.io.</string>
