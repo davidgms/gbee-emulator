@@ -234,6 +234,12 @@
     <string name="folders_unavailable_banner">Folder tidak tersedia: %1$s. Pilih lagi di Setelan.</string>
     <string name="empty_title">Belum ada ROM!</string>
     <string name="empty_body">Buka Setelan → Folder ROM untuk menambahkan folder game kamu.\n\nBzzt! Game kamu menunggu!</string>
+    <string name="homebrew_title">Game gratis untuk dicoba</string>
+    <string name="homebrew_body">GBee tidak menyertakan game. Game homebrew gratis ini legal untuk diunduh dan membuat pengujian cepat. Game GBA lain juga bisa.\n\nUnduh game, taruh di folder, lalu tambahkan folder itu di Setelan → Folder ROM.</string>
+    <string name="homebrew_fighter">Tembak-tembakan. Menguji sprite, suara, dan kecepatan.</string>
+    <string name="homebrew_varooom">Balap 3D. Menguji rotasi dan skala.</string>
+    <string name="homebrew_credit">Keduanya buatan GValiente, gratis di bawah CC BY-NC-SA 4.0. Ketuk game untuk membuka halaman itch.io-nya.</string>
+    <string name="homebrew_link">Atau coba game homebrew gratis</string>
     <string name="game_info_title">Info game</string>
     <string name="info_name">Nama</string>
     <string name="ok">OK</string>

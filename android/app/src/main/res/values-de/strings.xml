@@ -235,6 +235,12 @@
     <string name="folders_unavailable_banner">Ordner nicht verfügbar: %1$s. Wähle ihn in den Einstellungen neu.</string>
     <string name="empty_title">Noch keine ROMs!</string>
     <string name="empty_body">Geh zu Einstellungen → ROM-Ordner, um deine Spieleordner hinzuzufügen.\n\nBzzt! Deine Spiele warten!</string>
+    <string name="homebrew_title">Kostenlose Spiele zum Testen</string>
+    <string name="homebrew_body">GBee enthält keine Spiele. Diese kostenlosen Homebrew-Spiele darfst du legal herunterladen, und sie machen das Testen schnell. Jedes andere GBA-Spiel geht auch.\n\nLade ein Spiel herunter, leg es in einen Ordner und füge diesen Ordner unter Einstellungen → ROM-Ordner hinzu.</string>
+    <string name="homebrew_fighter">Shooter. Testet Sprites, Ton und Tempo.</string>
+    <string name="homebrew_varooom">3D-Rennen. Testet Drehung und Skalierung.</string>
+    <string name="homebrew_credit">Beide von GValiente, kostenlos unter CC BY-NC-SA 4.0. Tippe auf ein Spiel, um seine itch.io-Seite zu öffnen.</string>
+    <string name="homebrew_link">Oder probiere kostenlose Homebrew-Spiele</string>
     <string name="game_info_title">Spielinfo</string>
     <string name="info_name">Name</string>
     <string name="ok">OK</string>
