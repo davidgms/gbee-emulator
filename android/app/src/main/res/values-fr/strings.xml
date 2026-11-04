@@ -235,7 +235,13 @@
     <string name="favorite">Favori</string>
     <string name="folders_unavailable_banner">Dossier indisponible : %1$s. Choisissez-le à nouveau dans les Paramètres.</string>
     <string name="empty_title">Pas encore de ROM !</string>
-    <string name="empty_body">Allez dans Paramètres → Dossiers de ROM pour ajouter vos dossiers de jeux.\n\nBzzt ! Vos jeux vous attendent !</string>
+    <string name="empty_body">Allez dans Paramètres → Dossiers de ROM pour ajouter vos dossiers de jeux.</string>
+    <string name="homebrew_title">Jeux gratuits à essayer</string>
+    <string name="homebrew_body">GBee ne contient aucun jeu. Ces jeux homebrew gratuits sont légaux à télécharger et rendent les tests rapides. Tout autre jeu GBA fonctionne aussi.\n\nTéléchargez un jeu, mettez-le dans un dossier, puis ajoutez ce dossier dans Paramètres → Dossiers de ROM.</string>
+    <string name="homebrew_fighter">Shoot\'em up. Teste les sprites, le son et la vitesse.</string>
+    <string name="homebrew_varooom">Course 3D. Teste la rotation et la mise à l\'échelle.</string>
+    <string name="homebrew_credit">Tous deux par GValiente, gratuits sous CC BY-NC-SA 4.0. Touchez un jeu pour ouvrir sa page itch.io.</string>
+    <string name="homebrew_link">Pas de jeux ? Touchez ici pour voir des jeux homebrew gratuits</string>
     <string name="game_info_title">Infos du jeu</string>
     <string name="info_name">Nom</string>
     <string name="ok">OK</string>

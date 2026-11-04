@@ -5,6 +5,10 @@ import com.gbee.emulator.ui.storageLabel
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clipToBounds
@@ -186,6 +190,9 @@ fun RomBrowserScreen(
         animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
         label = "reload",
     )
+    // Opened only from the empty state's link, never on its own.
+    var showHomebrew by rememberSaveable { mutableStateOf(false) }
+    if (showHomebrew && roms.isEmpty()) HomebrewDialog { showHomebrew = false }
     var sortOrder by remember { mutableStateOf(RomSortOrder.LAST_PLAYED_DESC) }
     var sortMenuOpen by remember { mutableStateOf(false) }
 
@@ -338,7 +345,7 @@ fun RomBrowserScreen(
         if (roms.isEmpty()) {
             Column(modifier = Modifier.padding(padding)) {
                 UnavailableFoldersBanner()
-                EmptyState(modifier = Modifier.weight(1f))
+                EmptyState(modifier = Modifier.weight(1f), onHomebrew = { showHomebrew = true })
             }
         } else {
             Column(modifier = Modifier.padding(padding)) {
@@ -837,7 +844,7 @@ private fun UnavailableFoldersBanner() {
 }
 
 @Composable
-fun EmptyState(modifier: Modifier = Modifier) {
+fun EmptyState(modifier: Modifier = Modifier, onHomebrew: () -> Unit = {}) {
     // The icon is centred; the title and text under it are left-aligned and
     // use the screen width, so the text does not sit in a narrow centred box.
     Column(
@@ -872,7 +879,57 @@ fun EmptyState(modifier: Modifier = Modifier) {
             color = PineGlowMist.copy(alpha = 0.7f),
             lineHeight = 20.sp,
         )
+
+        TextButton(onClick = onHomebrew, contentPadding = PaddingValues(0.dp)) {
+            Text(
+                stringResource(R.string.homebrew_link),
+                color = GoldenSaplight,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.Underline,
+            )
+        }
     }
+}
+
+/** Free homebrew with open licences, so a tester has something to play. */
+private val HOMEBREW = listOf(
+    Triple("Butano Fighter", R.string.homebrew_fighter, "https://gvaliente.itch.io/butano-fighter"),
+    Triple("Varooom 3D", R.string.homebrew_varooom, "https://gvaliente.itch.io/varooom-3d"),
+)
+
+@Composable
+private fun HomebrewDialog(onDismiss: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = NightPanel,
+        titleContentColor = GoldenSaplight,
+        textContentColor = PineGlowMist,
+        title = { Text(stringResource(R.string.homebrew_title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.homebrew_body), fontSize = 13.sp)
+                for ((name, desc, url) in HOMEBREW) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { runCatching { uriHandler.openUri(url) } }
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(12.dp),
+                    ) {
+                        Text(name, color = GoldenSaplight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(desc), fontSize = 12.sp)
+                    }
+                }
+                Text(stringResource(R.string.homebrew_credit), fontSize = 11.sp, color = PineGlowMist.copy(alpha = 0.7f))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.ok), color = GoldenSaplight) }
+        },
+    )
 }
 
 /**
